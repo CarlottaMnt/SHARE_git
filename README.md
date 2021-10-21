@@ -21,4 +21,4 @@ The folders are organized as follow:
  * **MyData_file**: includes the version of the module cleaned by unreliable observations
  * **Output_file**: empty folder to store the resutls
  * **Panel**: constructed panel dataset for the outcome variable plus the Job Episode Panel
- * **Script**: secondary scripts for dataframe constructions
+ * **Script**: secondary scripts for dataframe constructions.
