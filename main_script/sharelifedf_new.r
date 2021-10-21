@@ -427,6 +427,7 @@ stargazer(df_partner)
 #####################################children.RData##################################################
 
 #Respondents children: here I select all the sahrelife variables in the retrospective children module
+
 load("Dataset_constructed/children.RData")
 
 sumTable <- base[,c("mergeid","cciw","age")] %>% 
