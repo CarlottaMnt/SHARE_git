@@ -1,0 +1,2037 @@
+---
+title: "Take Home Exam"
+subtitle: "Course: SEMINAR IN MACHINE LEARNING AND BIG DATA ANALYSIS"
+author: "Carlotta Montorsi"
+date: "31/09/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(include = FALSE)
+library(psych)
+#Main packages$s
+library(devtools)
+library(ggfortify); 
+library(ggplot2)
+library(glmnet)
+library(pROC)
+library(rpart)
+library(rpart.plot) 
+library(rattle)
+library(tidyverse)
+library(caret)
+library(randomForest)
+#--------------
+library(tables)
+library(qwraps2)
+library(ggbiplot)
+library(janitor)
+library(party)
+library(neuralnet)
+library(knitr)
+library(modelr)
+library(broom)
+library(ggpubr)
+library(kernlab)
+library(ggthemes)
+library(partykit)
+library(bestNormalize)
+library(xtable)
+library(plyr)     #Useful for gathering
+library(gtable)
+library(grid)
+library(corrplot)
+library(rpart.plot)
+library(here)
+library(naniar)
+library(forcats)
+library(gridExtra)
+library(foreign)
+library(data.table)
+library(sf)
+library(fastDummies)
+library(stargazer)
+library(VIM)
+library(MLmetrics)
+library(caTools)
+```
+
+# Introduction
+
+Population aging, intended as the a shift in the distribution of a country's population towards older ages, is among the main challenges of our times. The share of the EU population above the age of 65 is expected to reach almost 30\% by 2050 (starting from 19.2\% in 2016). It is therefore paramount, also from a policy-maker perspective, to identify factors that predict healthy and successful aging, and better living conditions for individuals who are facing the aging process.
+
+Understanding well-being is a priority but it is not an easy task.  What predicts well-being status? What explains the heterogeneity in well-being levels among the older? Which patterns of life events contribute in achieving successfully aging? 
+
+To answer these and related questions, the present study focuses on old aged individual in different European countries and compare the performance of Supervised Machine Learning (SML) in predicting well being of individuals facing the aging process. In particular, our first goal is to identify the best predictive model and the main retrospective events that could shape the individual physiological and psychological transition to old age and how these factors differ across European countries. We compare models' performances on different training and test set alongside the trade-off between model interpretability and growing complexity.
+
+# Dataset description
+
+We used data from the bi-annual Survey of Health, Aging, and Retirement in Europe (SHARE). The SHARE survey has collected individual-level data on health, socio-economic status and social and family networks of more than 123,000 individuals aged 50+ from many European countries and Israel \cite{borsch2019survey}. One key feature of SHARE is the special component named the SHARELIFE questionnaire. SHARELIFE has been included in the third wave (2008-2009) and seventh wave (2017, only for all respondents who did not participate in wave 3, 82\% respondents of wave 7\cite{borsch2019survey}) of data collection and collects retrospective information about people's life histories. For example, but not limited to, it covers childhood conditions, partnerships and parenting, employment trajectories, migration, housing, financial history, and major individual life events.
+
+The respondent's sample is based on SHARELIFE. We combine the two SHARELIFE waves in a cross sectional fashion. We select our respondents' sample according to the following criteria: we excluded countries where SHARELIFE was not carried out in both waves; we drop individuals that have missing information in the response variables, and we include only individual age 50 to 89 to avoid attrition bias and very unreliable report bias. The countries we examine are Austria, Belgium, Switzerland, Czech Republic, Germany, Denmark, Spain, France Greece, Italy, Poland and Sweden.
+
+# Outcome Variables
+
+All the response variables we analyze belong to the well being domain. The dashboard entails two composite index of mental and physical health and a measure of life satisfaction. These variable are collected in the standard CAPI questionnaire of regular SHARE waves. We select the closest measurement to the year when SHARELIFE was conduced. For example, for a respondent that participates to wave 5, 6 and 7 (SHARELIFE) we take the frailty or life satisfaction measured in wave 6. 
+
+The frailty index we used has been proposed by Rockhood et al.(2011), Mitnisky et al.(2001) and Abeliansky at. al (2018). These indexes are indicators of deficits that could be accumulated with age (\cite{romero2012frailty}). To built it, we coded 40 deficits collected in the physical module (PH) of SHARE using a mapping to the Likert scale interval 0-1. The frailty is then the proportion of deficits that an individual stated to have suffer from $FI_i=\frac{\sum_j^J d{ij}}{J}$, where $d_{ij}$ with $j = 1,\ldots,J$, indicates the deficit $j$ of an individual $i$ and J the total number of deficit considered (in our case J = 40). When there were missing responses for a given individual, we construct the indicator based on the available information and changing the denominator by subtracting to the total the number of missing items/deficit. Thus we remove observations where the missing deficits where more than 30.
+
+Concerning the mental health, in SHARE it is measured by the 12 questions that compose the so-called EURO-D instrument (Prince et al., 1999). The EURO-D instrument has good test retest reliability and internal consistency and, in terms of validity, correlates well with other well-known 
+health measures (Prince et al., 1999). The scale covers the following 12 items: depression, pessimism, suicidal ideation (wishing death), guilt, sleep, interest, irritability, appetite, fatigue, concentration, enjoyment and tearfulness. We construct a composite index by adding the 12 binary items ("Yes" or "not"), the maximum depression score is 12 while the minimum is 0. 
+
+Finally, life satisfaction in SHARE is measured by asking respondents to evaluate globally their life on a scale 1 to 10 of self reported satisfaction:
+\textit{On a scale from 0 to 10 where 0 means completely dissatisfied and 10 means completely satisfied, how satisfied are you with your life?}
+
+The literature on well-being treats frailty indexes and life satisfaction a numerical continuous item, while recoding the mental health derived from the euro-d scale into binary terms. Respondents are considered depressed if the number of euro-d symptoms is higher or equal to 4 while are not depressed otherwise. 
+
+Moreover, we perform further transformations on the frailty index before implementing the models. Since we deal with linear regression, we must first ensure that the outcome variable is normally distributed. We notice that the frailty index has a right-skewed distribution, far from being Normal. Thus, we use the *BestNormalize* function that selects the optimal transformation (Ordered Quantile) to ensure the variable is normally distributed.
+Then, being the frailty deterministically related to age and gender, we remove the effects of age and gender by running a linear regression of the normalized frailty on age, gender, countries, age squared, and interactions term. Thus, we take the residual from this fitted model as the target variable.
+
+# Data preprocessing
+
+Data preprocessing is an integral step in Machine Learning as the quality of data and the useful information that can be derived from it directly affects the ability of our model to learn; therefore, we must preprocess our predictor set before feeding it into our model.
+
+In particular we describe five main steps:
+
+1. One-Hot Encode categorical variables
+3. Missing value imputation
+4. Removal of near zero variance predictors
+5. Removal of almost perfectly collinear variable
+6. Removal of aliased coefficients.
+
+## One-Hot encode categorical variables
+
+Categorical variables are traditionally divided into 2 types:
+
+ * **Ordinal categorical variables** — these catogorical variables can be ordered. For example life satisfaction on a 0-10 scale. We can say that life satifaction of 2 is greater than life satisfaction on 1, however the distance across two sub sub-sequent categories is not uniform.  
+ 
+ * **Nominal categorical variables** — these variables cannot be ordered. Ex: marital status. We   can’t say that married < widowed as it doesn’t make any sense to compare marital status as they don’t have any relationship.
+ 
+These two types of categorical variables require different pre-processing procedures. 
+
+Ordinal variable could be encoded as number while nominal variable must be transform into dummy variable with One-Hot Encoding. With One-Hot Encoding we create ’K’ columns having $[0,1]$ as entries, where K is the number of unique categories that the nominal variable can take.
+
+In our dataset we count a total of 78 of nominal categorical features.
+
+Then, we transform them into dummy columns with the function *dummy_cols* from the *fastDummies* R package. After this transformation, the number of dummy columns amount to 338.
+
+## Missing value imputation
+
+Nonresponse is very common on experimental or observational studies based on survey data. The main distinction is among the unit non-response and the item non-response. The first occurs when eligible individuals decide to not participate in the survey with an explicit refusal, while the second occurs when the respondent provide a useful answer or he/she refuse to answer to a particular question. 
+
+Anyhow, missing data remains a topic not systematically covered in statistics or data science curricula. The traditional approach is to toss out cases with too many missing values but there is no a single solution or tool to manage missing data.
+
+In this study we decide to deal only with missing items. We have indeed assumed that missing units are insignificant as long as our data-set is representative of the old age population in a given countries, with respect to some variables of interest, such us income, age and gender. Moreover, by excluding from the sample the oldest old respondents, those aged 89+, commonly dropping out from surveys and observational studies, we solve attrition and report biases. 
+
+Missing items in the predictor set affect mainly three spheres: job/industry, work environment and relation with children. For these three groups the average missing response rate is 28\%, which is not negligible. Rather then drop out non responding units we decide to impute these missing items. To do so we use the k-nearest neighborhood imputation algorithm, implemented in the *VIM* package of R through the function *kNN*. This algorithm works on the concept of donor observation. The observations that result closest to the missing one are aggregated to impute the missing value. The kind of aggregation depends on the type of the variable. 
+
+In order to assess the imputations' implications on items distribution we compare the mean and standard deviation before and after imputation.
+
+
+```{r message=FALSE, warning=FALSE}
+#Import the data set and the functions
+load("MyData_file/output.RData") #Output
+load("MyData_file/covariate_imputed_reduced.RData") #Predictors
+load("Output_file/traindata.RData")
+#extract traindata and create xcle file
+library("xlsx")
+library("xlsx")
+# Write the first data set in a new workbook
+for(i in target_name){
+  for(j in c("pooled",countries)){
+    #name <- sprintf("sheet_%s_%s.xlsx",i,j)
+    x <- trainData[[i]][[t]].as.data.frame()
+    setdiff(names(trainData[["mental_index"]][["Poland"]]),names(trainData[["mental_index"]][["pooled"]]))
+    setdiff(names(trainData[["mental_index"]][["pooled"]]),names(trainData[["mental_index"]][["Poland"]]))
+    
+    setdiff(x)
+    #write.xlsx(x, file = name,
+    #  sheetName = name, append = FALSE)
+  }
+}
+write.xlsx(USArrests, file = "myworkbook.xlsx",
+      sheetName = "USA-ARRESTS", append = FALSE)
+# Add a second data set in a new worksheet
+write.xlsx(mtcars, file = "myworkbook.xlsx", 
+           sheetName="MTCARS", append=TRUE)
+# Add a third data set
+write.xlsx(iris, file = "myworkbook.xlsx",
+           sheetName="IRIS", append=TRUE)
+#Add income to the output 
+output <- left_join(output,covariate_imputed_reduced[,which(names(covariate_imputed_reduced) %in% c("mergeid","income"))])
+
+
+
+
+#Extract covariates from the predictor set: not include current circumstances and imputation columns
+covariate <- covariate_imputed_reduced %>%
+  clean_names() %>% 
+  dplyr::select(-c(
+    "yrbirth",
+    "int_year",
+    "hhid",
+    "age_int",
+    "nr_book",
+    "country_birth_2",
+    "isco_par",
+    "shr",
+    "cur_retired",
+    "fam_resp",
+    "fam_resp_imp",
+    "country_birth",
+    "con_in",
+    "con_out",
+    "income",
+    "cur_married",
+    "marry_1",
+    "cur_employed",
+    "age_when_retired_imp",
+    "cur_age_youngest_child_imp",
+    "cur_age_youngest_child",
+    "age_when_start_fin_stressperiod_imp",
+    "age_when_start_happyperiod_imp",
+    "age_when_start_stressperiod_imp",
+    "age_when_start_hungerperiod_imp",
+    "age_when_stop_fin_stressperiod_imp",
+    "age_when_stop_stressperiod_imp",
+    "age_when_stop_happyperiod_imp",
+    "age_when_stop_hungerperiod_imp",
+    "age_when_start_hungerperiod_imp",
+    "age_when_stop_fin_stressperiod_imp",
+    "age_when_stop_stressperiod_imp",
+    "age_when_stop_happyperiod_imp",
+    "age_when_stop_hungerperiod_imp",
+    "age_immigration_2_imp",
+    "age_immigration_3_imp",
+    "age_immigration_4_imp",
+    "age_immigration_5_imp",
+    "age_outmigration_1_imp",
+    "age_outmigration_3_imp",
+    "age_outmigration_2_imp",                           
+    "age_outmigration_4_imp",
+    "age_outmigration_5_imp", 
+    "age_outmigration_6_imp",
+  ),
+  -ends_with(c("never_end","never_end_imp","_na_imp")),
+  -starts_with(c(
+    "country_1",
+    "country_2",
+    "country_3",
+    "country_4",
+    "country_5",
+    "country_6",
+    "region_1",
+    "region_2",
+    "region_3",
+    "region_4",
+    "region_5",
+    "region_6"
+  ))
+  ) %>% 
+  names()
+
+
+#Which countries?
+countries <- c( 
+    "Austria",
+		"Belgium",
+		"Switzerland",
+		"Czech_Republic",
+		"Germany",
+		"Denmark",
+		"Spain",
+		"France",
+		"Greece",
+		"Italy",
+		"Poland",
+		"Sweden"
+)
+output_name <- c("frailty_index","income","lifesat","mental_index")
+
+```
+
+
+```{r message=FALSE, warning=FALSE}
+source("Functions.R")
+dataframe = builData(
+			target= output_name,  #provide the output_name
+			id = "mergeid",
+			dfy = output,	#Provide the output data set
+			x_names = covariate, #Provide the list of covariates from the predictor set
+			dfx = covariate_imputed_reduced,  #Provide the dataset of predictors
+			pooled = TRUE, #Create pooled sample?(TRUE/FALSE)
+			cnt = TRUE, #Create countries samples?(TRUE/FALSE)
+			adj = F, #Adjust the frailty index to remove age and gender    effect?(TRUE/FALSE)
+			VIF = F, #Remove Variance inflator factors? (TRUE/FALSE)
+			wave = FALSE)
+```
+```{r}
+"Principal component analysis on regressor matrix"
+
+summary_pc <- list()
+pca <- list()
+set.seed(134)
+for(t in c("pooled","Poland")){
+    df1 <- dataframe[[t]] %>% select_if(is.numeric) %>%    dplyr::select(-output_name)
+    hc <- findCorrelation(cor(df1), cutoff = 0.9, verbose = FALSE)
+    hc = names(df1[,hc])
+   
+    if(t == "pooled"){
+    pc <- prcomp(df1, center = TRUE,scale. = TRUE)
+    pca[[t]] <- autoplot(pc, data = dataframe[[t]],
+                              colour  = "country",
+                              loadings = TRUE,
+                              loadings.label = FALSE,
+                              loadings.colour = 'blue') +
+                              theme_tufte() 
+     #Five top correlated
+    topN <- 5
+    load.rot <- pc$rotation
+    names(load.rot[,1][order(abs(load.rot[,1]),decreasing=TRUE)][1:topN])
+    
+    }else{
+    pc <- prcomp(df1, center = TRUE,scale. = TRUE)
+    pca[[t]] <- autoplot(pc, data = dataframe[[t]],
+                              loadings = TRUE,
+                              loadings.label = F,
+                              loadings.colour = 'blue') +
+                              theme_tufte() 
+     #Five top correlated
+    topN <- 5
+    load.rot <- pc$rotation
+    names(load.rot[,1][order(abs(load.rot[,1]),decreasing=TRUE)][1:topN])
+     }
+    }
+pca[["pooled"]]
+pca[["Poland"]]
+
+```
+
+After data cleaning and pre-processing, the predictor set counts 265 items in the pooled sample and around .
+
+```{r}
+#Creating train and test
+source("Functions.R")
+
+trtestdf <- vector(mode="list", length = length(output_name))
+names(trtestdf) <- output_name
+
+#We now apply the function to create the train and test dataset. 
+for(s in output_name){
+ trtestdf[[s]] <- dataprep(
+			df = dataframe, 		#provide all the dataset in a list format
+			test = c("pooled", countries), #provide name for training/test sample
+			target = s,  #provide name for response variables
+			norm = ifelse(s == "lifesat", F,T) ,
+			id = "mergeid",       #provide id identifier
+			cat = ifelse(s != "mental_index",F,T) #transform into category? 
+			) 
+}
+```
+
+
+
+```{r message=TRUE, warning=TRUE, paged.print=TRUE}
+##PLOTTING KNITR
+##This piece of code create the plot of the train and test sample for the selected target.
+
+#Create list to store graphs.
+train <- list()
+
+#Which are the main target to plot?
+target_name <- c("frailty_index","lifesat", "income","mental_index")
+
+#Define which outcome to treat as numerical and which to be treated as classes. 
+###This should be in line with what you define in the databuilding function.
+
+target_name_num <- c("frailty_index","lifesat", "income")
+target_name_cat <- c("mental_index","lifesat")
+
+for(i in target_name){
+  for(t in c("pooled",countries)){
+    
+  trainData <- trtestdf[[i]][[1]][[t]] #we are selecting the i output, train, sample
+
+  #Train Output
+  
+  Y_train = trainData %>% select(output)
+  
+  #Mean and standard deviation in the train sample of numerical target
+  if(i %in% target_name_num){
+  mean_train = mean(Y_train$output)
+  sd_train =   sd(Y_train$output)
+  }
+  #Percentage of observation in each class of categorical target
+  
+  if(i %in% c(target_name_cat)){
+  perc_train = Y_train %>%
+    dplyr::mutate(n = n()) %>% 
+    dplyr::group_by(output) %>%
+    dplyr::summarise(count = n(), pct = round(count/n,4)) %>% 
+    mutate(sample = "train")
+  }
+  
+  Y_train$sample <- "train"
+
+  #TEST output
+
+  testData <- trtestdf[[i]][[2]][[t]]
+  Y_test = testData %>% select(output)
+  
+  if(i %in% target_name_num){
+  mean_test = mean(Y_test$output)
+  sd_test = sd(Y_test$output)
+  }
+  
+  if(i %in% target_name_cat){
+  perc_test = Y_test %>%
+  dplyr::mutate(n = n()) %>% 
+  dplyr::group_by(output) %>%
+  dplyr::summarise(count = n(), pct = round(count/n,4)) %>% 
+  mutate(sample = "test")
+  }
+  Y_test$sample = "test"
+
+#Explore the distribution of the target in the train and test sample in the three target
+
+df_plot <- rbind(Y_train,Y_test)
+stats <- matrix(c(round(mean_test,2), round(mean_train,2),round(sd_train,2), round(sd_test,2)), nrow=2, ncol = 2) %>% as.data.frame()
+colnames(stats) <- c("mean","sd")
+stats$sample <- c("train","test")
+
+if(i %in% target_name_cat){
+df_perc <- rbind(perc_train, perc_test)
+ if(i == "mental_index"){
+ df_perc$output <- plyr::revalue(df_perc$output, c(X1= "Not Depressed",X2 ="Depressed"))
+ }
+ train[[i]][[t]] <- ggplot(df_perc,  
+                            aes(x = as.factor(output),
+                                y = pct,
+                                color = sample,
+                                fill = sample, 
+                                label = scales::percent(round(pct,2)))) +
+  geom_col(alpha = 0.5, position = "dodge")+
+  scale_color_manual(
+      name = "Sample",
+      breaks = c("train", "test"),
+      values = c("#9370DB","#014421")
+    )+
+    scale_fill_manual(
+      name = "Sample",
+      breaks = c("train", "test"),
+      values = c("#9370DB","#014421")
+    )+
+    scale_y_continuous(labels = scales::percent)+
+    scale_x_discrete()+
+  labs(fill = NULL)+
+  xlab(paste0(i))+
+  theme_tufte()+
+  ggtitle(paste0(i))
+  if(i == "mental_index"){
+  train[[i]][[t]] <-  train[[i]][[t]]  +
+      geom_text(position = position_dodge(width = .5),    # move to center of bars
+              vjust = -0.5,    # nudge above top of bar
+              size = 4)
+  }
+ if(i == "lifesat"){
+  train[[i]][[t]] <- train[[i]][[t]] +
+      geom_vline(xintercept = mean_train, colour = "black", linetype = "longdash")+
+      geom_vline(xintercept = mean_test, colour = "#014421", linetype = "dotted")+
+    geom_text(data = stats %>%  filter(sample == "train"), aes(y = 0.12, x= 2, label =paste0("Mean: ", mean)),
+            color = "#9370DB",
+            alpha = 1,
+            vjust = 1, 
+            size = 4
+    )+
+    geom_text(data = stats %>%  filter(sample == "train"), aes(y = 0.1,x= 2, label = paste0("Sd: " ,sd)),
+            color = "#9370DB",
+            alpha = 1,
+            position = position_dodge(width = 1.5),
+            vjust = 1, 
+            size = 4
+    )+
+    geom_text(data = stats %>%  filter(sample == "test"), aes(y = 0.12, x= 4.3, label =paste0("Mean: ", mean)),
+            position = position_dodge(width = 1.5),
+            alpha = 1,
+            color = "#014421",
+            vjust = 1, 
+            size = 4
+    )+
+    geom_text(data = stats %>%  filter(sample == "test"), aes(y =0.1, x= 4, label = paste0("Sd: " ,sd)),
+            position = position_dodge(width = 1.5),
+            color = "#014421",
+            alpha = 1,
+            vjust = 1,
+            size = 4
+    ) 
+ }
+}
+else {
+    
+  train[[i]][[t]] <- ggplot(df_plot, aes(output, fill = sample, color = sample)) +
+    theme_tufte()+
+    geom_histogram(aes(y=..count../sum(..count..) * 100), bins = 30, alpha = 0.8, position = "dodge") +
+    
+    geom_text(data = stats %>%  filter(sample == "train"), aes(y = 4, x= -2, label =paste0("Mean: ", mean)),
+            color = "#9370DB",
+            vjust = 1, 
+            size = 4,
+            alpha = 1
+    )+
+    geom_text(data = stats %>%  filter(sample == "train"), aes(y = 3,x= -2, label = paste0("Sd: " ,sd)),
+            color = "#9370DB",
+            position = position_dodge(width = 1.5),
+            vjust = 1,
+            size = 4,
+            alpha = 1
+    )+
+    geom_text(data = stats %>%  filter(sample == "test"), aes(y = 4, x= 2, label =paste0("Mean: ", mean)),
+            position = position_dodge(width = 1.5),
+            color = "#014421",
+            vjust = 1, 
+            size = 4,
+            alpha = 1
+    )+
+    geom_text(data = stats %>%  filter(sample == "test"), aes(y = 3, x= 2, label = paste0("Sd: " ,sd)),
+            position = position_dodge(width = 1.5),
+            color = "#014421",
+            vjust = 1, size = 4,
+            alpha = 1
+    ) +
+    geom_vline(xintercept = mean_train, colour = "black", linetype = "longdash")+
+    geom_vline(xintercept = mean_test, colour = "#014421", linetype = "dotted") +
+    scale_color_manual(
+      name = "Sample",
+      breaks = c("train", "test"),
+      values = c("#9370DB", "#014421")
+    )+
+    scale_fill_manual(
+      name = "Sample",
+      breaks = c("train", "test"),
+      values = c("#9370DB","#014421")
+    )+
+  labs(fill = NULL)+
+  xlab(paste0(i))+
+  ylab("Frequencies")+
+  ggtitle(paste0(i))
+  }
+  }
+}
+
+ggarrange(train[["frailty_index"]][["pooled"]],
+          nrow = 1,
+          ncol = 1,
+          common.legend = TRUE, legend="bottom")
+          
+ggarrange(train[["lifesat"]][["pooled"]],
+          nrow = 1,
+          ncol = 1,
+          common.legend = TRUE, legend="bottom")
+
+ggarrange(train[["income"]][["pooled"]],
+          nrow = 1,
+          ncol = 1,
+          common.legend = TRUE, legend="bottom")
+ 
+ggarrange(train[["mental_index"]][["pooled"]],
+          nrow = 1,
+          ncol = 1,
+          common.legend = TRUE, 
+          legend="bottom"
+          )          
+          
+
+```
+
+
+
+```{r include=FALSE}
+#Extract output and covariate from in the training and test sample
+##Now we separately define predictor set and target in the test sample. 
+#And trainData for each target.
+
+target_name <- c("frailty_index","mental_index","income","lifesat")
+
+Y_train <- vector(mode= "list", length = length(target_name))
+Y_test <-  vector(mode= "list", length = length(target_name))
+names(Y_train) <- target_name
+names(Y_test) <- target_name
+
+X_test <- vector(mode = "list", length = length(target_name))
+names(X_test) <- target_name
+
+trainData <- vector(mode= "list", length = length(target_name))
+names(trainData) <- target_name
+
+
+#i: iterate the targets
+#t: interate the samples
+
+for(i in target_name){
+  for(t in c("pooled",countries)){
+  
+  #TRAIN SET 
+  train <- trtestdf[[i]][[1]][[t]] #we are selecting the i output, train, sample
+
+  trainData[[i]][[t]] <- train
+  n = nrow(trainData[[i]][[t]] )
+
+
+  #TEST output
+
+  testData <- trtestdf[[i]][[2]][[t]]
+  Y_test[[i]][[t]] = testData %>% select(output)
+  X_test[[i]][[t]] = testData %>% select(-output)
+  }
+}
+save(Y_test,file = "Output_file/y_test.RData")
+save(X_test,file = "Output_file/x_test.RData")
+```
+
+
+
+
+# Supervised Machine learning models
+
+When dealing with problems having high dimensional data, it result appealing to rely on some kind of automated, data-driven method that helps discovering patterns otherwise neglected from traditional knowledge. Supervised machine learning algorithms can be used to this end.
+
+In their general formulation, Supervised Machine learning are methods for automatically building a predictive function $\mathcal{F}$ that maps $\mathcal{X}$, the predictor set, to a prediction $\mathcal{y}$, the target variable, given a set of training instances (the
+training set) represented by tuples $(\mathcal{X}_i,\mathcal{y}_i)$. The predictor set $\mathcal{X}$ could contain both categorical or numerical features as well the target variable $\mathcal{y}$ could be either categorical or numerical. In case the target is numerical (real-valued), the prediction task is called *regression*. On the other hand, when the target variable is categorical (nominal or discrete), the prediction task is called *classification*. 
+
+The training step is also called *tuning* step and it is central in the model's building. It entails the selection of an optimal model through the optimization of the model's parameters, such that the out-of-sample predictions from the selected model results in the minimum out-of-sample error rate. To optimize the parameters' values, different methods have been proposed. When dealing with a data-rich situation, the best approach is to divide the sample into three parts: the training set, the validation set, and the test set. The training set is used to fit the models; the validation set is used to estimate prediction error for model selection; the test set is used for assessing the predictive accuracy of the final chosen model. Ideally, the test set should be kept separated from the other set and used only at the end of the data analysis. 
+
+In our predictive exercise we will estimate through repeated training and validation approach (5-fold cross validation) eight different predictive functions. We start from the mainstream approaches based on linear/logistic models fit by least squares and maximum likelihood and we proceed along a trade off between model complexity and interpretability. We apply shrinkage methods, three-based methods, boosting methods and neural networks.
+
+
+## Linear model for regression 
+
+The linear model has been the mainstream statistical model for the past three decades. In its simplest formulation, given a vector of input features $X^T = (X_1, X_2,\ldots ,X_p)$, the predictive function $\mathcal{F}$ over the p-dimensional input space takes the following form: $$\hat{Y} = \hat{\beta}_0 + \sum_{j = 1}^p X_j \hat{\beta}_j.$$ The term $\hat{\beta}_0$ is the intercept, and it is names as **bias** in machine learning. 
+
+From the above specification it appears that the predictive function $\mathcal{F}$ is linear and additive in the parameters $\beta$. In order to fit this model to a set of training data $\{\mathcal{X}_i, y_i\}_{i=1}^N$, different methods could be used, but the most popular is the least squares method. 
+
+Least squares approach picks the coefficients $\beta$ that minimize the residual sum of squares $$RSS(\beta)= \sum_{i=1}^N(y_i - x_i^T\beta)^2 = (\boldsymbol{y} - \boldsymbol{X}\beta)^T(\boldsymbol{y} - \boldsymbol{X}\beta)\\= \boldsymbol{y}^T\boldsymbol{y}- \beta^TX^T \boldsymbol{y}- \boldsymbol{y}^T\boldsymbol{X}\beta + \beta^T\boldsymbol{X}^T\boldsymbol{X}\beta$$
+
+Where the second term is the matrix notation of the RSS. The RSS is a quadratic function of the parameters and it admits always a minimum, even if not unique. We can derive the solution by setting the first derivative with respect to $\beta$ equal to 0:
+$$\frac{\delta RSS}{\delta \beta} = -2\boldsymbol{X}^T\boldsymbol{y}+ 2\boldsymbol{X}^T\boldsymbol{X}= \boldsymbol{X}^T(\boldsymbol{y}- \boldsymbol{X}\beta)$$ .
+If $\boldsymbol{X}^T\boldsymbol{X}$ is non singular, i.e. the determinant is not equal to zero, then the unique solution is given by $$\hat{\beta} = (\boldsymbol{X}^T\boldsymbol{X})^{-1}\boldsymbol{X}^T\boldsymbol{y}.$$ 
+
+One point to mention is the case when the columns of $\boldsymbol{X}$ are not linearly independent, that makes $\boldsymbol{X}$ not of full rank and $\boldsymbol{X}^T\boldsymbol{X}$ a singular matrix. In this case the least squares coefficients $\hat{\beta}$ are not uniquely defined. The natural way for solving this issue is through data pre-processing by recoding or dropping redundant columns in $\boldsymbol{X}$, as explain in the previous section. 
+
+The least square method is effective in the case of real-valued output. In our exercise we would use this method for predicting the frailty index and life satisfaction while, for the binary coded mental health, we must opt for classification methods explained in the following section. 
+
+
+```{r message=TRUE, warning=TRUE, paged.print=TRUE}
+####################################LINEAR REGRESSION MODEL########################
+####################################################################################
+
+#Fitting linear regression for NUMERICAL TARGET with least squares method
+
+lm <- list()
+predictions <- list()
+validation <- list()
+test_measure <- list() 
+Rsquared <- list()
+RMSE <- list()
+MAE <- list()
+
+p <- list()
+for(i in c("frailty_index","lifesat","income")){
+  for(t in c("pooled", countries)){
+ 
+    lm[[i]][[t]] = train(
+      form = output ~ .,
+      data = trainData[[i]][[t]],
+       trControl = trainControl(method = "cv", number = 10),
+      method = "lm"
+      )
+  }
+}
+ #Make and store predictions: for income and frailty, predictions with no transformation.
+ #for lifesat, ceiling the predictions to be integer . 
+p <- list()
+for(i in c("frailty_index","lifesat","income")){
+  for(t in c("pooled", countries)){    
+        if(i %in%  c("frailty_index","income")){
+              predictions[[i]][[t]][["lm"]] <- lm[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+              validation[[i]][[t]][["lm"]] <- lm[[i]][[t]]$resample%>% 
+              as.data.frame() %>% 
+              mutate(model = "lm")
+        }
+          else{
+              predictions[[i]][[t]][["lm"]] <- lm[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+              validation[[i]][[t]][["lm"]] <- lm[[i]][[t]]$resample %>% 
+              as.data.frame() %>% 
+              mutate(model = "lm")
+              }
+  }
+}
+
+#Plot predictions versus real values
+
+for(i in c("frailty_index","lifesat","income")){
+   for(t in c("pooled",countries)){
+ xf <- sprintf("Figures/lm_%s_%s.pdf",i,t)
+ 
+ pred_real <- cbind("pred" =   as.numeric(as.character(predictions[[i]][[t]][["lm"]])), "real" =   Y_test[[i]][[t]]) %>% 
+  mutate(abs_err = abs(pred- output), err_2 = (pred- output)^2 )
+
+Rsquared[[i]][[t]][["lm"]] <- round(cor(pred_real$pred,pred_real$output),3)
+RMSE[[i]][[t]][["lm"]] <- round(sqrt(sum(pred_real$err_2)/length(pred_real$err_2)),3)
+MAE[[i]][[t]][["lm"]] <- round(sum(pred_real$abs_err)/length(pred_real$abs_err),3)
+
+test_measure[[i]][[t]][["lm"]] <- cbind("RMSE" = RMSE[[i]][[t]][["lm"]] ,
+                      "Rsquared" = Rsquared[[i]][[t]][["lm"]],
+                      "MAE" = MAE[[i]][[t]][["lm"]]) %>% 
+                as.data.frame() %>% 
+                mutate(model = "lm")
+  
+if(i %in% c("frailty_index","income")){
+p[[i]][[t]] <- ggplot(pred_real,                                     # Draw plot using ggplot2 package
+       aes(y = pred,
+           x = output,
+           color = err_2
+           )) +
+  geom_point() +
+  geom_smooth(
+              color = "red",
+              size = 1,)+
+  geom_abline(slope =1, size = 2, color = "purple")+
+  ylab("Prediction")+
+  geom_text(x = -2, y = 1.2, label= paste0("MAE: ", MAE[[i]][[t]][["lm"]]), color = "black", size = 3)+
+  geom_text(x = -2, y = 1, label= paste0("RMSE: ", RMSE[[i]][[t]][["lm"]]), color = "black", size = 3)+
+  geom_text(x = -2, y = 0.8, label= paste0("R2: ", Rsquared[[i]][[t]][["lm"]]), color = "black", size = 3)+
+  ggtitle(paste0("Predictions vs Output \n Sample: ",t, "\n Model: lm"))+
+  theme_tufte()
+ggsave(filename = xf,plot = p[[i]][[t]])
+  }else{
+  if(i == "lifesat")
+ 
+  pred_real <- pred_real %>%
+  gather(Value, Variable, -c(abs_err,err_2)) %>% 
+  dplyr::mutate(n = n(), Variable = floor(Variable)) %>% 
+  dplyr::group_by(Variable, Value) %>%
+  dplyr::summarise(count = n(), pct = round(count/n,3))
+  
+  p[[i]][[t]] <- ggplot(pred_real,                                   
+       aes(as.factor(Variable), y = pct, color= Value, fill = Value, label =       scales::percent(pct)))+
+       geom_col(alpha = 0.5, position = "dodge")+
+       geom_text(position = position_dodge(width = .5),     
+              vjust = -0.5,   
+              size = 3) +
+        scale_y_continuous(labels = scales::percent)+
+        scale_x_discrete()+
+       xlab(paste0(i))+
+       guides(fill=guide_legend(title="Sample"), color = FALSE)+
+       theme_tufte()+
+       ggtitle(paste0("Predictions vs Output.\n Sample: ",t, "\n Model: lm"))+
+       geom_text(x = 5, y = 0.1, label= paste0("MAE: ", MAE[[i]][[t]][["lm"]]), color = "black", size = 3)+
+       geom_text(x = 5, y = 0.12, label= paste0("RMSE: ", RMSE[[i]][[t]][["lm"]]), color = "black", size = 3)+
+       geom_text(x = 5, y = 0.14, label= paste0("R2: ", Rsquared[[i]][[t]][["lm"]]), color = "black", size = 3)
+  ggsave(filename = xf,plot = p[[i]][[t]])
+  }
+}
+}
+```
+
+## Logistic model for classification
+
+When the target variable is not real-valued, e.g. it is nominal-categorical or discrete, we enter the classification realm and the linear model becomes too rigid to provide reliable results.
+
+In general, when dealing with categorical targets the mainstream approaches rely on the Bayes theorem. 
+Given two events A and B, the Bayes theorem states that the conditional probability of A given B is equal to the joint probability of the two events divided by the probability of the event that has occurred (in this case B): $$P(A\mid B) = \frac{P(A \cap B)}{P(B)};$$
+rearranging the terms and recognizing that $P(A\cap B)$=$P(B\cap A)$ we can write: $$P(A\cap B)= P(A\mid B)\cdot P(B)= P(B\mid A)\cdot P(A)\\\implies P(A\mid B)= \frac{P(B\mid A)\cdot P(A)}{P(B)};$$
+
+The term in the left hand side is named *posterior probability* of A while the terms on the nominator in the right hand side are called likelihood of B given A, i.e. $P(B\mid A)$ and prior of A, i.e P(A). 
+These theorem is essential in decision theory for classification. In this setting we define as $\mathcal{G}$ the discrete set of possible classes. For a binary target, for example, $\mathcal{G}=\{0,1\}$. And we define a predictor function $G: \mathcal{X} \to \mathcal{G}$ that map the predictor set to the discrete set of possible classes. In other words, the predictor $G(x)$ should divide the input space into a collection of regions labeled according to the classification. To create regions one requires to find regions' boundaries. The dominant approach is to estimate the boundaries by modeling *discriminat functions* that takes the form of a posterior probabilities of each target's classes: $$\delta_k(x) = Pr(G = k\mid X = x);$$ and then classify $x$ to the class with the largest value for its discriminant function (or the largest posterior probability). 
+
+To estimate posterior class probabilities we apply Bayes theorem. Suppose $f_k(x) = Pr(X=x\mid G= k)$ is the likelihood of observing $x$ in class $G=K$, and $\pi_k$ is the prior probability of class $k$. Then, Bayes theorem states that:$$
+P(G = k \mid X = x) = \frac{f_k(x)\cdot \pi_k(x)}{P(X = x)}$$.
+
+There exist many techniques that are based on models for class densities, for example linear and quadratic discriminant analysis and Naive Bayes models, mixture of Gaussian, general non parametric density estimates and logistic regression. In our application we will rely on logistic regression model.
+
+Logistic regression models have been largely applied and have been proven to achieve highest predictive performance, especially with respect to linear and quadratic discriminant analysis. 
+
+The logistic models specified the posterior probability of the K classes through a linear functions in $x$ while ensuring that these probabilities sum to one and remain in the interval $[0,1]$.
+
+The logistic regression model is specified in terms of the K-1 logit transformations of the posterior probabiltiy (log-odds). Then, when K = 2, as in our application, it has a simple form : 
+$$log\left(\frac{Pr(G = 1\mid X = x)}{1-Pr(G = 1\mid X = x)}\right)= \boldsymbol{X}\beta;$$
+Then, we can rearrange the equation by taking exponential in both sides of the equation:$$
+\frac{Pr(G = 1\mid X = x)}{1-Pr(G = 1\mid X = x)} = exp(\boldsymbol{X}\beta) \\
+\implies Pr(G = 1\mid X = x)= exp(\boldsymbol{X}\beta)\cdot [1-Pr(G = 1\mid X = x)] = exp(\boldsymbol{X}\beta) - exp(\boldsymbol{X}\beta)Pr(G = 1\mid X = x)\\
+\implies Pr(G = 1\mid X = x) + exp(\boldsymbol{X}\beta)Pr(G = 1\mid X = x) = exp(\boldsymbol{X}\beta) \\ 
+\implies Pr(G = 1\mid X = x)[1+ exp(\boldsymbol{X}\beta)] = exp(\boldsymbol{X}\beta) \\ \implies Pr(G = 1\mid X = x) = \frac{exp(\boldsymbol{X}\beta)}{1+ exp(\boldsymbol{X}\beta)}.$$
+
+This model is traditionally fit with maximum likelihood using the conditional likelihood of G given X. To maximize the score function, which is the derivative of the log likelihood with respect to the parameter of interest $(\beta)$, a e Newton–Raphson algorithm is traditionally used.  
+
+We use logistic regression to predict the "depression" status of our respondents.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#Train the logistic model for mental health
+roc <- list()
+prob <- list()
+for(t in c("pooled",countries)){
+lm[["mental_index"]][[t]] = train(
+  form = output ~ .,
+  data = trainData[["mental_index"]][[t]],
+  trControl = trainControl(
+    method = "cv", 
+    number = 10,
+    classProbs = TRUE,
+    summaryFunction = twoClassSummary,
+    sampling = "down"),#Performing down sampling to solve classes unbalances
+  method = "glm",
+  family = "binomial"
+)}
+
+#Predictions-test
+sensitivity <-  list()
+ROC <- list()
+specificity <- list()
+
+for(t in c("pooled",countries)){
+ xf <- sprintf("Figures/lm_mental_index_%s.pdf",t)
+predictions[["mental_index"]][[t]][["lm"]] <- predict(lm[["mental_index"]][[t]], X_test[["mental_index"]][[t]]) 
+
+pred_real <- cbind("pred" = predictions[["mental_index"]][[t]][["lm"]], Y_test[["mental_index"]][[t]]) %>% 
+  gather(Value, Variable) %>% 
+  dplyr::mutate(n = n()) %>% 
+  dplyr::group_by(Variable, Value) %>%
+  dplyr::summarise(count = n(), pct = round(count/n,3))
+
+#Revalue for plotting
+pred_real$Variable <- plyr::revalue(pred_real$Variable , c(X1 = "Not Depressed",X2 ="Depressed"))
+
+#Accuracy and Sensitivity
+
+sensitivity[["mental_index"]][[t]][["lm"]] <-    confusionMatrix(predictions[["mental_index"]][[t]][["lm"]],Y_test[["mental_index"]][[t]]$output)$byClass["Sensitivity"]
+ 
+  ROC[["mental_index"]][[t]][["lm"]] <-    confusionMatrix(predictions[["mental_index"]][[t]][["lm"]],Y_test[["mental_index"]][[t]]$output)$overall["Accuracy"]
+  specificity[["mental_index"]][[t]][["lm"]] <-    confusionMatrix(predictions[["mental_index"]][[t]][["lm"]],Y_test[["mental_index"]][[t]]$output)$byClass["Specificity"]
+
+
+#Validation accuracy
+
+validation[["mental_index"]][[t]][["lm"]] <- lm[["mental_index"]][[t]]$resample %>% mutate(model = "lm")
+#Create the sample with the test
+
+test_measure[["mental_index"]][[t]][["lm"]] <- cbind("ROC"= ROC[["mental_index"]][[t]][["lm"]],
+                      "Sens" = sensitivity[["mental_index"]][[t]][["lm"]],
+                      "Spec"= specificity[["mental_index"]][[t]][["lm"]]
+                     ) %>% 
+                as.data.frame() %>% 
+                mutate(model = "lm") 
+
+
+#plot of predictions: real vs predicted
+p[[i]][[t]] <-  ggplot(pred_real,                                     
+       aes(as.factor(Variable), y = pct, color= Value, fill = Value, label = scales::percent(pct)))+
+       geom_col(alpha = 0.5, position = "dodge")+
+       geom_text(position = position_dodge(width = .5),    # move to center of bars
+              vjust = -0.5,    # nudge above top of bar
+              size = 4) +
+        scale_y_continuous(labels = scales::percent)+
+        scale_x_discrete()+
+        xlab("")+
+        guides(fill=guide_legend(title="Sample"), color = FALSE)+
+        theme_tufte()+
+        ggtitle(paste0("Predictions vs Output.\n Sample: ",t,"\n Model: lm")) + 
+        geom_text(x = "Depressed", y = 0.30, label= paste0("Accuracy: ", round(ROC[["mental_index"]][[t]][["lm"]],3)), color = "black", size = 3)+
+        geom_text(x = "Depressed", y = 0.28, label= paste0("Sensitivity: ",round(sensitivity[["mental_index"]][[t]][["lm"]],3)), color = "black", size = 3)
+ggsave(filename = xf, p[[i]][[t]])
+}
+```
+
+
+```{r pressure, echo=TRUE, fig.keep='all'}
+#roc curve
+for(t in c("pooled",countries)){
+prob[["mental_index"]][[t]][["lm"]] <- predict(lm[["mental_index"]][[t]], X_test[["mental_index"]][[t]], type = "prob") 
+
+pROC_obj <- pROC::roc(Y_test[["mental_index"]][[t]]$output,prob[["mental_index"]][[t]][["lm"]][,2],
+            smoothed = TRUE,
+            # arguments for ci
+            ci=TRUE, ci.alpha=0.9, 
+            stratified=FALSE,
+            plot= FALSE, 
+            auc.polygon=TRUE,
+            max.auc.polygon=TRUE, 
+            grid=TRUE,
+            print.auc=TRUE, show.thres=TRUE)
+
+
+roc[["mental_index"]][[t]][["lm"]] <- ci.se(pROC_obj)
+
+plot(roc[["mental_index"]][[t]][["lm"]])
+}
+```
+
+
+## Regularized regression: ridge, lasso, elastic net.
+
+Regularized regressions such as ridge, lasso and elastic net regression belongs to the class of shrinkage methods. Shrinkage methods act similar to subset selection methods, because they reduce the number of initial predictors to a subset that has the highest predictive power, while shrinking or setting all the other coefficients to zero. They are preferred to subset selection methods because they provide more robust results and suffer of less variability. 
+
+Shrinkage methods controls for over-fitting by adding a penalization term the loss function, so that the total loss function to be minimized takes the form $$E_D(\beta) + \lambda E_\beta(\beta)$$ where $\lambda$ is the regularization coefficient that controls the relative importance of the data-dependent error $E_D(\beta)$ and the regularization term $E_\beta(\beta)$, it must me estimated through cross validation. 
+
+In many socio-economic applications, the loss function considered is the residual sum of square (RSS) we have presented in the linear regression framework: $$RSS(\beta)= \sum_{i=1}^N(y_i - \boldsymbol{x}^T_i\beta)^2$$
+
+Thus, depending on the regularization term considered, different models arises. The *ridge regression* imposes the $l_2$-penalty to the coefficients such that $E_\beta(\beta) = \mid\beta\mid ^2 = \sum_{j=1}^p \beta_j^2$; the *lasso regression* impose the $l_1$ norm such that $E_\beta(\beta) =\mid\beta\mid_1 = \sum_{j=1}^p \mid \beta_j\mid$. These two methods have been intensively used and they differ essentially in the shrinkage effects they have on the parameters: the ridge regression shrink less important parameter towards zero while never setting them exactly to zero, the lasso methods instead, allows the parameter to be exactly equal to zero thus implementing real variable selection. 
+
+Although these methods have shown success in many situations, they have some limitations. In the case $p > n$, e.g. the number of predictor is higher then the number of observations, the lasso select at most $n$ variables before it saturates. If there is a group of variables highly correlated, the lasso would select only one variable from the group while neglecting the others. 
+
+To solve these limitations, a new regularizer has been proposed by Zou H. and Hastie T. (2005)and it is named *elastic net*. 
+
+The elastic net penalty is a convex combination of the lasso and ridge penalties and takes the following form:$$(1- \alpha)\mid\beta\mid_1 +  \alpha\mid\beta\mid^2.$$
+The elastic net solves the inner problem of lasso and ridge but is requires higher computational cost.
+
+In our application we will compare predictive performance among these three reguarizer as well as among others predictive models. 
+
+```{r pressure, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Grid for parameter searching
+ridge <-list()
+lasso <- list()
+elnet <- list()
+lambda <- 10^seq(-3, 3, length = 100)
+trControl_mental = trainControl(method = "cv",
+                                number = 10,
+                     classProbs = TRUE,
+                     search = "random",
+                     summaryFunction = twoClassSummary,
+                     sampling = "down")
+
+tr_Control =  trainControl(method = "cv",
+                           number = 10,
+                           search = "random")
+for(i in output_name){
+  for(t in c("pooled",countries)){
+cat(i,t)
+start_time=Sys.time()
+#Ridge model
+if(i %in% c("frailty_index","lifesat","income")){
+ridge[[i]][[t]] <- train(
+  output ~ ., 
+  data = trainData[[i]][[t]],
+  method = "glmnet",
+  metric = "RMSE",
+  trControl = tr_Control,
+  tuneGrid = expand.grid(alpha = 0, lambda = lambda)
+  )
+cat("time_ridge",Sys.time()-start_time)			
+#lasso model
+start_time=Sys.time()
+lasso[[i]][[t]] <- train(
+  output ~ ., 
+  data = trainData[[i]][[t]],
+  method = "glmnet",
+  metric = "RMSE",
+  trControl =  tr_Control,
+  tuneGrid = expand.grid(alpha = 1, lambda = lambda)
+  )
+cat("time_lasso",Sys.time()-start_time)		
+#elastic net model
+start_time=Sys.time()
+elnet[[i]][[t]] <- train(
+  output ~ ., 
+  data = trainData[[i]][[t]],
+  method = "glmnet",
+  metric = "RMSE",
+  trControl = tr_Control,
+  tuneLength = 30
+  )
+cat("time_elnet",Sys.time()-start_time)		
+}else{
+start_time=Sys.time()  
+ridge[[i]][[t]] <- train(
+  output ~ ., 
+  data = trainData[[i]][[t]],
+  method = "glmnet",
+  metric = "ROC",
+  trControl = trControl_mental,
+  tuneGrid = expand.grid(alpha = 0, lambda = lambda)
+  )
+cat("time_lasso",Sys.time()-start_time)		
+#lasso model
+start_time=Sys.time()
+lasso[[i]][[t]] <- train(
+  output ~ ., 
+  data = trainData[[i]][[t]],
+  method = "glmnet",
+  metric = "ROC",
+  trControl = trControl_mental,
+  tuneGrid = expand.grid(alpha = 1, lambda = lambda)
+  )
+cat("time_lasso",Sys.time()-start_time)		
+#elastic net model
+start_time=Sys.time()
+elnet[[i]][[t]] <- train(
+  output ~ ., 
+  data = trainData[[i]][[t]],
+  method = "glmnet",
+  metric = "ROC",
+  trControl = trControl_mental,
+  tuneLength = 30
+)
+cat("time_lasso",Sys.time()-start_time)		
+}
+  }
+}
+
+#Make and store predictions
+for(i in output_name){
+    for(t in c("pooled",countries)){
+    
+ if(i %in% c("frailty_index","income")){
+ 
+ predictions[[i]][[t]][["lasso"]] <- lasso[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["lasso"]] <- lasso[[i]][[t]]$resample %>% mutate(model ="lasso")
+ 
+ predictions[[i]][[t]][["ridge"]] <- ridge[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["ridge"]] <- ridge[[i]][[t]]$resample %>% mutate(model = "ridge")
+
+ predictions[[i]][[t]][["elnet"]] <- elnet[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["elnet"]] <- elnet[[i]][[t]]$resample %>% mutate(model = "elnet")
+ }
+ if(i == "lifesat"){
+ predictions[[i]][[t]][["lasso"]] <- lasso[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["lasso"]] <- lasso[[i]][[t]]$resample%>% mutate(model = "lasso")
+ 
+ predictions[[i]][[t]][["ridge"]] <- ridge[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["ridge"]] <- ridge[[i]][[t]]$resample %>% mutate(model = "ridge")
+ 
+ predictions[[i]][[t]][["elnet"]] <-  elnet[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["elnet"]] <-  elnet[[i]][[t]]$resample %>% mutate(model = "elnet")
+  }else{
+    
+ predictions[[i]][[t]][["lasso"]] <- lasso[[i]][[t]] %>% predict(X_test[[i]][[t]])
+ validation[[i]][[t]][["lasso"]] <- lasso[[i]][[t]]$resample %>% mutate(model = "lasso")
+ 
+ predictions[[i]][[t]][["ridge"]] <- ridge[[i]][[t]] %>% predict(X_test[[i]][[t]])
+ validation[[i]][[t]][["ridge"]] <- ridge[[i]][[t]]$resample %>% mutate(model = "ridge")
+ 
+ predictions[[i]][[t]][["elnet"]] <-  elnet[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["elnet"]] <-  elnet[[i]][[t]]$resample %>% mutate(model = "elnet")
+  }
+  }
+}
+p_regular <- list()
+
+for(i in target_name){
+  for(t in c("pooled",countries))
+  for(m in c("lasso","ridge","elnet")){
+  xf <- sprintf("Figures/%s_%s_%s.pdf",i,t,m)
+  if(i %in% c("frailty_index","lifesat","income")){
+  pred_real <- cbind("pred" = predictions[[i]][[t]][[m]], "real" = Y_test[[i]][[t]]) %>% 
+  mutate(abs_err = abs(pred - output), err_2 = (pred- output)^2 )
+  #predictive accuracy measure
+  Rsquared[[i]][[t]][[m]] <- round(cor(pred_real$pred,pred_real$output),3)
+  RMSE[[i]][[t]][[m]] <- round(sqrt(sum(pred_real$err_2)/length(pred_real$err_2)),3)
+  MAE[[i]][[t]][[m]] <- round(sum(pred_real$abs_err)/length(pred_real$abs_err),3)
+  
+  test_measure[[i]][[t]][[m]] <- cbind("RMSE" = RMSE[[i]][[t]][[m]] ,
+                      "Rsquared" = Rsquared[[i]][[t]][[m]],
+                      "MAE" = MAE[[i]][[t]][[m]]) %>% 
+                as.data.frame() %>% 
+                mutate(model = m)
+  
+  #Plot
+  if(i %in% c("frailty_index","income")){
+  p_regular[[i]][[t]][[m]] <-ggplot(pred_real,                                     # Draw plot using ggplot2 package
+       aes(y = pred,
+           x = output,
+           color = err_2
+           )) +
+  geom_point() +
+  geom_smooth(
+              color = "red",
+              size = 1,)+
+  geom_abline(slope =1, size = 2, color = "purple")+
+  ylab("Prediction")+
+  geom_text(x = -2, y = 1.2, label= paste0("MAE: ", MAE[[i]][[t]][[m]]), color = "black", size = 3)+
+  geom_text(x = -2, y = 1, label= paste0("RMSE: ", RMSE[[i]][[t]][[m]]), color = "black", size = 3)+
+  geom_text(x = -2, y = 0.8, label= paste0("R2: ",  Rsquared[[i]][[t]][[m]] ), color = "black", size = 3)+
+  ggtitle(paste0("Predictions vs Output \n Sample: ",t, "\n Model:",m))+
+  theme_tufte()
+  ggsave(filename= xf, plot =  p_regular[[i]][[t]][[m]] )
+  }else{
+  if(i == "lifesat")
+ 
+  pred_real <- pred_real %>%
+  gather(Value, Variable, -c(abs_err,err_2)) %>% 
+  dplyr::mutate(n = n(),Variable = floor(Variable)) %>% 
+  dplyr::group_by(Variable, Value) %>%
+  dplyr::summarise(count = n(), pct = round(count/n,3))
+  
+  p_regular[[i]][[t]][[m]] <- ggplot(pred_real,                                   
+       aes(as.factor(Variable),
+           y = pct, color= Value, fill = Value, label = scales::percent(pct)))+
+       geom_col(alpha = 0.5, position = "dodge")+
+       geom_text(position = position_dodge(width = .5),     
+              vjust = -0.5,   
+              size = 3) +
+        scale_y_continuous(labels = scales::percent)+
+        scale_x_discrete()+
+       xlab(paste0(i))+
+       guides(fill=guide_legend(title="Sample"), color = FALSE)+
+       theme_tufte()+
+       ggtitle(paste0("Predictions vs Output.\n Sample: ",t, "\n Model: ",m))+
+       geom_text(x = 5, y = 0.1, label= paste0("MAE: ", MAE[[i]][[t]][[m]]), color = "black", size = 3)+
+       geom_text(x = 5, y = 0.12, label= paste0("RMSE: ",RMSE[[i]][[t]][[m]]), color = "black", size = 3)+
+       geom_text(x = 5, y = 0.14, label= paste0("R2: ", Rsquared[[i]][[t]][[m]] ), color = "black", size = 3)
+  ggsave(filename= xf, plot =  p_regular[[i]][[t]][[m]] )
+  }
+  }else{
+  pred_real <- cbind("pred" = predictions[[i]][[t]][[m]], Y_test[[i]][[t]]) %>% 
+  gather(Value, Variable) %>% 
+  dplyr::mutate(n = n()) %>% 
+  dplyr::group_by(Variable, Value) %>%
+  dplyr::summarise(count = n(), pct = round(count/n,3))
+  pred_real$Variable <- plyr::revalue(pred_real$Variable , c(X1 = "Not Depressed",X2 ="Depressed"))
+
+   #Accuracy and Sensitivity in test sample
+
+  sensitivity[["mental_index"]][[t]][[m]] <-      confusionMatrix(predictions[["mental_index"]][[t]][[m]],Y_test[["mental_index"]][[t]]$output)$byClass["Sensitivity"]
+ 
+  ROC[["mental_index"]][[t]][[m]] <-    confusionMatrix(predictions[["mental_index"]][[t]][[m]],Y_test[["mental_index"]][[t]]$output)$overall["Accuracy"]
+  
+  specificity[["mental_index"]][[t]][[m]] <-    confusionMatrix(predictions[["mental_index"]][[t]][[m]],Y_test[["mental_index"]][[t]]$output)$byClass["Specificity"]
+
+
+#Validation accuracy
+
+ validation[["mental_index"]][[t]][[m]] <- lm[["mental_index"]][[t]]$resample %>% mutate(model = m)
+#Create the sample with the test
+
+ test_measure[["mental_index"]][[t]][[m]] <- cbind("ROC"= ROC[["mental_index"]][[t]][[m]],
+                      "Sens" = sensitivity[["mental_index"]][[t]][[m]],
+                      "Spec"= specificity[["mental_index"]][[t]][[m]]
+                     ) %>% 
+                as.data.frame() %>% 
+                mutate(model = m)
+
+  #plot of predictions: real vs predicted
+  p_regular[[i]][[t]][[m]] <-  ggplot(pred_real,                                     
+       aes(as.factor(Variable), y = pct, color= Value, fill = Value, label = scales::percent(pct)))+
+       geom_col(alpha = 0.5, position = "dodge")+
+       geom_text(position = position_dodge(width = .5),    # move to center of bars
+              vjust = -0.5,    # nudge above top of bar
+              size = 4) +
+        scale_y_continuous(labels = scales::percent)+
+        scale_x_discrete()+
+        xlab(paste0(i))+
+        guides(fill=guide_legend(title="Sample"), color = FALSE)+
+        theme_tufte()+
+        ggtitle(paste0("Predictions vs Output.\n Sample: ",t, "\n Model: ", m)) + 
+        geom_text(x = "Depressed", y = 0.30, label= paste0("Accuracy: ", round(ROC[["mental_index"]][[t]][[m]],3)), color = "black", size = 3)+
+        geom_text(x = "Depressed", y = 0.28, label= paste0("Sensitivity: ",round( sensitivity[["mental_index"]][[t]][[m]] ,3)), color = "black", size = 3)
+  ggsave(filename= xf, plot =  p_regular[[i]][[t]][[m]] )
+  }
+ }
+}
+
+```
+
+```{r set-options, echo=FALSE, cache=FALSE}
+options(hight = 40)
+#plot the regualrization results for the pooled sample and frailty index
+
+X <- trainData[["frailty_index"]][["pooled"]][-1] %>% as.matrix
+y <- trainData[["frailty_index"]][["pooled"]][[1]]
+#
+set.seed(101)
+lasso.glmnet <- cv.glmnet(X, y, alpha = 1, family = "gaussian",type.measure='mse')
+ridge.glmnet <-  cv.glmnet(X,y,alpha = 0, family = "gaussian",	type.measure='mse')
+elnet25 <-  cv.glmnet(X,y,alpha = 0.25, family = "gaussian",	type.measure='mse')
+elnet75  <- cv.glmnet(X, y,alpha = 0.75, family = "gaussian",	type.measure='mse')
+#Elastic net
+par(mfrow = c(2, 2),"mar"=c(5, 4, 4, 2))
+plot(ridge.glmnet, main = "RIDGE penalty(alpha = 0)\n\n")
+plot(elnet25, main = "ELNET penalty(alpha = .25)\n\n")
+plot(elnet75, main = "ELNET penalty(alpha = .75)\n\n")
+plot(lasso.glmnet, main = "LASSO penalty(alpha = 1)\n\n")
+#Plot
+ridge_min <- glmnet(
+  X,
+  y ,
+  alpha = 0,
+  family = "gaussian")
+lasso_min <- glmnet(
+	x = X,
+	y = y,
+	alpha = 1,
+	family = "gaussian",
+	type.measure='mse'
+	)
+elenet25_min <- glmnet(
+	x = X,
+	y = y,
+	alpha = .25,
+	family = "gaussian",
+	type.measure='mse'
+	)
+elenet75_min <- glmnet(
+	x = X,
+	y = y,
+	alpha = .75,
+	type.measure='mse'
+	)
+	#PLOT results-------------------------------------------
+    par(mfrow = c(2, 2),"mar"=c(5, 4, 4, 2))
+# plot ridge model
+plot(ridge_min, xvar = "lambda", main = "Ridge penalty(alpha = 0)\n\n")
+	abline(v = log(ridge.glmnet$lambda.min), col = "red", lty = "dashed")
+	abline(v = log(ridge.glmnet$lambda.1se), col = "blue", lty = "dashed")
+#Plot elnet25
+	plot(elenet25_min, xvar = "lambda", main = "Elnet penalty (alpha = 0.25) \n\n")
+	abline(v = log(elnet25$lambda.min), col = "red", lty = "dashed")
+	abline(v = log(elnet25$lambda.1se), col = "blue", lty = "dashed")
+#Plot elnet75
+	plot(elenet75_min, xvar = "lambda", main = "Elnet penalty (alpha = 0.75)\n\n")
+	abline(v = log(elnet75$lambda.min), col = "red", lty = "dashed")
+	abline(v = log(elnet75$lambda.1se), col = "blue", lty = "dashed")
+# plot lasso model
+	plot(lasso_min, xvar = "lambda", main = "Lasso penalty (alpha = 1)\n\n")
+	abline(v = log(lasso.glmnet$lambda.min), col = "red", lty = "dashed")
+	abline(v = log(lasso.glmnet$lambda.1se), col = "blue", lty = "dashed")
+```
+
+```{r}
+c<-coef(lasso,s='lambda.1se',exact=TRUE)
+inds<-which(c!= 0)
+variables<-row.names(c)[inds]
+variables<-variables[variables %in% '(Intercept)']
+#caret
+coef(lasso[["lifesat"]][["pooled"]]$finalModel, lasso[["lifesat"]][["pooled"]]$finalModel$lambdaOpt)
+```
+
+
+```{r pressure, echo=TRUE, fig.keep='all'}
+#Roc curve
+for(t in c("pooled")){
+  for(m in c("elnet")){
+prob[["mental_index"]][[t]][["lasso"]] <- predict(lasso[["mental_index"]][[t]], X_test[["mental_index"]][[t]], type = "prob") 
+prob[["mental_index"]][[t]][["ridge"]] <- predict(ridge[["mental_index"]][[t]], X_test[["mental_index"]][[t]], type = "prob") 
+prob[["mental_index"]][[t]][["elnet"]] <- predict(elnet[["mental_index"]][[t]], X_test[["mental_index"]][[t]], type = "prob") 
+
+pROC_obj <- pROC::roc(Y_test[["mental_index"]][[t]]$output,prob[["mental_index"]][[t]][[m]][,2],
+            smoothed = TRUE,
+            # arguments for ci
+            ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+            # arguments for plot
+            plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+            print.auc=TRUE, show.thres=TRUE)
+
+
+roc[["mental_index"]][[t]][[m]] <- ci.se(pROC_obj)
+
+
+plot(roc[["mental_index"]][[t]][[m]])
+title(paste0("Sample: ",t,"\n Model: ", m))
+  }
+}
+
+```
+
+## Three-based methods
+
+Tree-based methods were popularized by Breiman, Freidman, Olshen, and Stone around 1984 that independently a similar approach to classification based on inductive learning, and they have gained increasing attention in recent years.
+
+
+Generally speaking, decision tree algorithms seek to recursively segment or partition the predictor space $\boldsymbol{X}$  into non-overlapping regions, from this procedure arises the "tree" structure that gives the name to the algorithm. The recursive partitioning approach is also commonly known as *divide and conquer* beacuse it splits the data into subsets, which are then split repeatedly into even smaller subsets, and so on and so forth until the process stops when the algorithm determines the data within the subsets are sufficiently homogeneous. 
+
+To select the predictor and the best splitting threshold of each predictor, the algorithm look at maximizing the between regions' distance and minimizing the within region homogeneity in the target values. The within region homogeneity can be computed through various methods, the more used are the Gini entropy for classification problem and the sum of squares errors for regression problem. To understand these measure, let define the properties of the impurity function $f$. We have $C$ target classes and we define the impurity of a given node $A$ as $$I(A)=\sum_{K=1}^Cf(p_{iA})$$ where $p_{iA}$ is the proportion of those in A that belong to class {k} for future samples. The impurity function to be 0 when the node is pure, i.e. $I(A)=0$ when A is pure, and it must be concave with $f(1)= f(0)= 0$. The Gini index responds to these characteristic and it is formulated as $f(p) = p(1-p)$. Thus, we select the split with maximum impurity reduction, such that:$$\Delta I = p(A)I(A)-p(A_L)I(A_L)-p(A_R)I(A_R)$$
+
+```{r}
+#Three based method
+
+tree <- list()
+trControl_mental = trainControl(method = "cv",
+                                number = 10,
+                     classProbs = TRUE,
+                     search = "random",
+                     summaryFunction = twoClassSummary,
+                     sampling = "down")
+
+tr_Control =  trainControl(method = "cv",
+                           number = 10,
+                           search = "random")
+
+for(i in output_name){
+  for(t in c("pooled",countries)){
+  cat(i,t)
+  if(i %in% c("lifesat","frailty_index","income")){
+  start_time=Sys.time()
+  #Tree models and pruned 
+  tree[[i]][[t]] <- train(
+  output ~ ., 
+  data = trainData[[i]][[t]],
+  method = "rpart",
+  metric = "RMSE",
+  trControl= tr_Control
+  )
+  cat("time_tree",Sys.time()-start_time)}else{
+  start_time=Sys.time()
+  tree[[i]][[t]] <- train(
+  output ~ ., 
+  data = trainData[[i]][[t]],
+  method = "rpart",
+  metric = "ROC",
+  trControl= trControl_mental,
+  tuneLength = 30,
+  )
+ cat("time_tree",Sys.time()-start_time)
+  }
+  }
+}
+plot(tree[[i]][[t]])
+```
+
+```{r}
+#PRUNING PROCEDURES
+
+#We grow the three at maximum and we prune it back
+#selecting the cost complexity parameter that best suit
+
+tree_overfitted <- rpart(output ~ ., data = trainData[["income"]][["pooled"]],
+               method = "anova",
+			         control = rpart.control(cp = 0))
+
+#Plot Decision Tree
+fancyRpartPlot(tree_overfitted,  main = "Overfitted tree")
+#prediction from overfitting the model
+y_pred_train <- predict(tree_overfitted, newdata = trainData[["lifesat"]][["pooled"]][-1] , type = "vector")
+train_error <- mean(abs(y_pred_train - trainData[["lifesat"]][["pooled"]][1]$output))
+
+#Accuracy of the base model
+y_pred <- predict(tree_overfitted, newdata = X_test[["lifesat"]][["pooled"]] , type = "vector")
+test_error <- mean(abs(y_pred - Y_test[["lifesat"]][["pooled"]]$output))
+df_overfitted <- data.frame(train_error, test_error)
+rownames(df_overfitted) <- "Overfitted"
+
+#Prune the overfitted trees 
+tree_pruned <- prune(tree_overfitted, cp = tree_overfitted$cptable[which.min(tree_overfitted$cptable[,"xerror"]),"CP"])
+fancyRpartPlot(tree_pruned, main = "Pruned tree")
+# Compute the accuracy of the pruned tree
+#In sample
+y_pred_pruned_train <- predict(tree_pruned , newdata= trainData[["lifesat"]][["pooled"]][-1], type = "vector")
+y_pred_pruned_test <- predict(tree_pruned , newdata= X_test[["lifesat"]][["pooled"]], type = "vector")
+
+train_error <-  mean(abs(y_pred_pruned_train - trainData[["lifesat"]][["pooled"]][1]$output))
+test_error <- mean(abs(y_pred_pruned_test  - Y_test[["lifesat"]][["pooled"]]$output))
+
+##Post pruned Plot
+df_pruned <- data.frame(train_error, test_error)
+rownames(df_pruned) <- "Pruned"
+
+df <- rbind(df_overfitted, df_pruned)
+kable(df, format = "latex")
+```
+
+
+```{r}
+
+#Predictions for the tree
+
+#Make and store predictions
+#load("Output_file/tree.RData")
+for(i in target_name){
+    for(t in c("pooled",countries)){
+ if(i %in% c("frailty_index","income")){
+ 
+ #predictions[[i]][[t]][["tree"]] <- tree[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["tree"]] <- validation_tree[[i]][[t]]$tree %>% mutate(model = "tree")
+ }
+ if(i == "lifesat"){
+ #predictions[[i]][[t]][["tree"]] <- tree[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["tree"]] <- validation_tree[[i]][[t]]$tree %>% mutate(model = "tree")
+  }else{
+    
+ #predictions[[i]][[t]][["tree"]] <- tree[[i]][[t]] %>% predict(X_test[[i]][[t]])
+ validation[[i]][[t]][["tree"]] <- validation_tree[[i]][[t]]$tree %>% mutate(model = "tree")
+  }
+}
+}
+
+p_tree <- list()
+
+for(i in target_name){
+ for(t in c("pooled",countries)){
+  xf <- sprintf("Figures/tree_%s_%s.pdf",i,t)
+  if(i %in% c("frailty_index","lifesat","income")){
+  pred_real <- cbind("pred" = predictions[[i]][[t]][["tree"]], Y_test[[i]][[t]]) %>% 
+  mutate(abs_err = abs(pred - output), err_2 = (pred- output)^2 )
+  #predictive accuracy measure
+  Rsquared[[i]][[t]][["tree"]] <- round(cor(pred_real$pred,pred_real$output),3)
+  RMSE[[i]][[t]][["tree"]] <- round(sqrt(sum(pred_real$err_2)/length(pred_real$err_2)),3)
+  MAE[[i]][[t]][["tree"]] <- round(sum(pred_real$abs_err)/length(pred_real$abs_err),3)
+  
+  test_measure[[i]][[t]][["tree"]] <- cbind("RMSE" = RMSE[[i]][[t]][["tree"]],
+                                            "Rsquared" = Rsquared[[i]][[t]][["tree"]],
+                                             "MAE" = MAE[[i]][[t]][["tree"]])  %>% 
+                as.data.frame() %>% 
+                mutate(model = "tree")
+  #Create dataframe
+  
+  #Plot
+  if(i %in% c("frailty_index","income")){
+  p_tree[[i]][[t]] <-ggplot(pred_real,  
+       aes(y = pred,
+           x = output,
+           color = err_2
+           )) +
+  geom_point() +
+  geom_smooth(
+              color = "red",
+              size = 1,)+
+  geom_abline(slope =1, size = 2, color = "purple")+
+  ylab("Prediction")+
+  geom_text(x = -2, y = 1.2, label= paste0("MAE: ", MAE[[i]][[t]][["tree"]]), color = "black",     size = 3)+
+  geom_text(x = -2, y = 1, label= paste0("RMSE: ", RMSE[[i]][[t]][["tree"]]), color = "black",    size = 3)+
+  geom_text(x = -2, y = 0.8, label= paste0("R2: ", Rsquared[[i]][[t]][["tree"]]), color = "black", size = 3)+
+  ggtitle(paste0("Predictions vs Output \n Sample: ",t, "\n Model: tree"))+
+  theme_tufte()
+  }else{
+  if(i == "lifesat")
+ 
+  pred_real <- pred_real %>%
+  gather(Value, Variable, -c(abs_err,err_2)) %>% 
+  dplyr::mutate(n = n(), Variable = floor(Variable)) %>% 
+  dplyr::group_by(Variable, Value) %>%
+  dplyr::summarise(count = n(), pct = round(count/n,3))
+  
+  p_tree[[i]][[t]]<- ggplot(pred_real,                                   
+       aes(as.factor(Variable),
+           y = pct, color= Value, fill = Value, label =       scales::percent(pct)))+
+       geom_col(alpha = 0.5, position = "dodge")+
+       geom_text(position = position_dodge(width = .5),     
+              vjust = -0.5,   
+              size = 3) +
+        scale_y_continuous(labels = scales::percent)+
+        scale_x_discrete()+
+       xlab(paste0(i))+
+       guides(fill=guide_legend(title="Sample"), color = FALSE)+
+       theme_tufte()+
+       ggtitle(paste0("Predictions vs Output.\n Sample: ",t, "\n Model: tree"))+
+       geom_text(x = 5, y = 0.1, label= paste0("MAE: ",  MAE[[i]][[t]][["tree"]]), color = "black", size = 3)+
+       geom_text(x = 5, y = 0.12, label= paste0("RMSE: ", RMSE[[i]][[t]][["tree"]]), color = "black", size = 3)+
+       geom_text(x = 5, y = 0.14, label= paste0("R2: ",  Rsquared[[i]][[t]][["tree"]]), color = "black", size = 3)
+  }
+  }else{
+  pred_real <- cbind("pred" = predictions[[i]][[t]][["tree"]], Y_test[[i]][[t]]) %>% 
+  gather(Value, Variable) %>% 
+  dplyr::mutate(n = n()) %>% 
+  dplyr::group_by(Variable, Value) %>%
+  dplyr::summarise(count = n(), pct = round(count/n,3))
+  pred_real$Variable <- plyr::revalue(pred_real$Variable , c(X1 = "Not Depressed",X2 ="Depressed"))
+
+   #Accuracy and Sensitivity
+
+    sensitivity[["mental_index"]][[t]][["tree"]] <-      confusionMatrix(predictions[["mental_index"]][[t]][["tree"]],Y_test[["mental_index"]][[t]]$output)$byClass["Sensitivity"]
+ 
+  ROC[["mental_index"]][[t]][["tree"]] <-      confusionMatrix(predictions[["mental_index"]][[t]][["tree"]],Y_test[["mental_index"]][[t]]$output)$overall["Accuracy"]
+  
+  specificity[["mental_index"]][[t]][["tree"]] <-    confusionMatrix(predictions[["mental_index"]][[t]][["tree"]],Y_test[["mental_index"]][[t]]$output)$byClass["Specificity"]
+test_measure[["mental_index"]][[t]][["tree"]] <- cbind("ROC"= ROC[["mental_index"]][[t]][["tree"]],
+                      "Sens" = sensitivity[["mental_index"]][[t]][["tree"]],
+                      "Spec"= specificity[["mental_index"]][[t]][["tree"]]
+                     ) %>% 
+                as.data.frame() %>% 
+                mutate(model = "tree")
+  #plot of predictions: real vs predicted
+  p_tree[[i]][[t]] <-  ggplot(pred_real,                                     
+       aes(as.factor(Variable), y = pct, color= Value, fill = Value, label = scales::percent(pct)))+
+       geom_col(alpha = 0.5, position = "dodge")+
+       geom_text(position = position_dodge(width = .5),    # move to center of bars
+              vjust = -0.5,    # nudge above top of bar
+              size = 4) +
+        scale_y_continuous(labels = scales::percent)+
+        scale_x_discrete()+
+        xlab(paste0(i))+
+        guides(fill=guide_legend(title="Sample"), color = FALSE)+
+        theme_tufte()+
+        ggtitle(paste0("Predictions vs Output.\n Sample: ",t, "\n Model: tree")) + 
+        geom_text(x = "Depressed", y = 0.30, label= paste0("Accuracy: ",    round(ROC[["mental_index"]][[t]][["tree"]],3)), color = "black", size = 3)+
+        geom_text(x = "Depressed", y = 0.28, label= paste0("Sensitivity: ",round( sensitivity[["mental_index"]][[t]][["tree"]],3)), color = "black", size = 3)
+  }
+ }
+}
+```
+
+##Random forest
+
+Highly related with the three-based methods explained in the previous section, the random forest is an ensemble of decision trees originally developed by Leo Breiman in 2001 \cite{breiman2001random}.
+
+To train a random forest, the bagging or bootstrap aggregation algorithm is the preferred method. Generally speaking, the bagging procedure allows to reduce the prediction variance of traditional decision tree.  It first requires to randomly select independents subsample (bootstrap) of the training sample.  For each random sub-sample $b = 1, \ldots, B$, it builds a depth tree and it estimates a prediction of the test sample.  Finally, it averages over B to obtain a low variance statistical learning model. The bagging procedure applies both in classification and regression settings. The functional form obtained has the following form:
+
+\[\hat{y}_{avg}= \frac{1}{B}\sum_{b=1}^B \hat{y}^b\]
+
+However, although the bagging procedure reduce the variance of the decision trees it has a minor disadvantage in that it is likely to create correlated trees. Indeed, bagged trees are built relying on all the predicting features and, if there is a highly predicting feature in the predictor set, each tree will select that predictor for splitting and the resulting trees will be very similar, hence increasing correlation in the predictions.
+
+The random forest procedure is an improvement over bagging since it reduces the correlation among the trees, resulting in a improved predictive quality. To reduce correlation, the random forest algorithm not only select a random sub sample of the training set but it also performs a random selection within the predictor matrix, choosing at each iteration a subset $\bar{X}\subseteq X$ of size $m$. In the presence of strong predictor, this procedure allows other less important predictor to be selected hence reducing the correlation among trees as well as the variance of the learning algorithm.  The main difference between bagging and random forests is the choice
+of predictor subset size $m$. Indeed, when $m=p$ the random forest is equal to bagging.
+
+However, the improved predictive quality of random forests comes at a cost. It is no longer possible to interpret the terminal nodes as we do with decision-trees, as homogeneous region of observations. These explain why the algorithm have been mainly used for prediction task. 
+
+```{r}
+
+#Parallelize computation of random forests
+library(doParallel)
+cl <- makePSOCKcluster(5)
+registerDoParallel(cl)
+
+#Start estimationg
+set.seed(1234)
+for(i in target_name){
+  for(t in c("pooled")){
+ctrl <- trainControl(method = "cv",
+                     number = 10,
+                     search = "random",
+                     savePredictions = "final",
+                     index = cv_folds,
+                     ) 
+
+ctrl_mental <- trainControl(method = "cv",
+                     number = 10,
+                     search = "random",
+                     classProbs = TRUE,
+                     savePredictions = "final",
+                     index = cv_folds,
+                     summaryFunction = twoClassSummary,
+                     sampling = "down") 
+
+  set.seed(65)
+  if(i %in% c("lifesat","frailty_index","income")){
+  rf[[i]][[t]] <- train(output~.,
+                       data = trainData[[i]][[t]],
+                       method = "rf",
+                       importance=TRUE,
+                       metric = "RMSE",
+                       tuneLength = 30,
+                       trControl = ctrl,
+                       ntree = 100,
+                       nodesize = 10)
+  }
+  else{
+  rf[[i]][[t]] <- train(output~.,
+                       data = trainData[[i]][[t]],
+                       method = "rf",
+                       importance = TRUE,
+                       metric = "Kappa",
+                       tuneLength = 30,
+                       trControl = ctrl_mental,
+                       ntree = 100,
+                       nodesize = 5)
+    }
+  }
+}
+stopCluster(cl)
+```
+
+```{r}
+#Make predictions with random forest
+#Make and store predictions
+for(i in target_name){
+  for(t in c(countries)){
+    xf <- sprintf("Output_file/rf_%s_%s.RData", i,t)
+ if(i %in% c("frailty_index","income")){
+ predictions[[i]][[t]][["rf"]] <- rf[[i]][[t]] %>%  predict(X_test[[i]][[t]])
+ validation[[i]][[t]][["rf"]] <- rf[[i]][[t]]$resample %>% 
+                as.data.frame() %>% 
+                mutate(model = "rf")
+ }
+ if(i == "lifesat"){
+ load(xf)
+ i = predictions[[i]][[t]][["rf"]] <- rf[[i]][[t]] %>% predict(X_test[[i]][[t]]) 
+ validation[[i]][[t]][["rf"]] <- rf[[i]][[t]]$resample%>% 
+                as.data.frame() %>% 
+                mutate(model = "rf")
+  }else{
+ load(xf)
+ predictions[[i]][[t]][["rf"]] <- rf[[i]][[t]] %>%   predict(X_test[[i]][[t]])
+ validation[[i]][[t]][["rf"]] <- rf[[i]][[t]]$resample%>% 
+                as.data.frame() %>% 
+                mutate(model = "rf")
+   }
+  }
+}
+
+varImp <-list(xPoland,xItaly)
+
+setdiff(rownames(varImp[[1]]$importance),rownames(varImp[[2]]$importance))
+
+#Plot predictions versus real values
+p_rf <- list()
+
+for(i in target_name){
+   for(t in countries){
+  xf <- sprintf("Figures/%s_%s_rf.png",i,t)
+  if(i %in% c("income","frailty_index","lifesat")){
+  pred_real <- cbind("pred" = as.numeric(as.character(predictions[[i]][[t]][["rf"]])), "real" = Y_test[[i]][[t]]) %>% 
+  mutate(abs_err = abs(pred- output), err_2 = (pred- output)^2 )
+
+Rsquared[[i]][[t]][["rf"]] <- round(cor(pred_real$pred,pred_real$output),3)
+RMSE[[i]][[t]][["rf"]] <- round(sqrt(sum(pred_real$err_2)/length(pred_real$err_2)),3)
+MAE[[i]][[t]][["rf"]] <- round(sum(pred_real$abs_err)/length(pred_real$abs_err),3)
+
+test_measure[[i]][[t]][["rf"]] <- cbind("RMSE" = RMSE[[i]][[t]][["rf"]] ,
+                      "Rsquared" = Rsquared[[i]][[t]][["rf"]],
+                      "MAE" = MAE[[i]][[t]][["rf"]]) %>% 
+                as.data.frame() %>% 
+                mutate(model = "rf")
+  
+if(i %in% c("frailty_index","income")){
+p_rf[[i]][[t]] <- ggplot(pred_real,                                     # Draw plot using ggplot2 package
+       aes(y = pred,
+           x = output,
+           color = err_2
+           )) +
+  geom_point() +
+  geom_smooth(
+              color = "red",
+              size = 1,)+
+  geom_abline(slope =1, size = 2, color = "purple")+
+  ylab("Prediction")+
+  geom_text(x = -1.8, y = 1.2, label= paste0("Mae: ", MAE[[i]][[t]][["rf"]]), color = "black")+
+  geom_text(x = -1.8, y = 1, label= paste0("Rmse: ", RMSE[[i]][[t]][["rf"]]), color = "black",
+            alpha = 1,
+            vjust = 1, 
+            size = 4)+
+  geom_text(x = -1.8, y = 0.8, label= paste0("R2: ", Rsquared[[i]][[t]][["rf"]]), color = "black")+
+  ggtitle(paste0("Predictions vs Output \n Sample: ",t, "\n Model: rf","\n Target: ",i))+
+  theme_minimal()
+
+ggsave(p_rf[[i]][[t]], filename = xf)
+  }else{
+  if(i == "lifesat")
+ 
+  pred_real <- pred_real %>%
+  gather(Value, Variable, -c(abs_err,err_2)) %>% 
+  dplyr::mutate(n = n(),Variable = floor(Variable)) %>% 
+  dplyr::group_by(Variable, Value) %>%
+  dplyr::summarise(count = n(), pct = round(count/n,3))
+  
+  p_rf[[i]][[t]] <- ggplot(pred_real,                                   
+       aes(as.factor(Variable), y = pct, color= Value, fill = Value, label =       scales::percent(pct)))+
+       geom_col(alpha = 0.5, position = "dodge")+
+       geom_text(position = position_dodge(width = .5),     
+              vjust = -0.5,   
+              size = 3) +
+        scale_y_continuous(labels = scales::percent)+
+        scale_x_discrete()+
+       xlab(paste0(i))+
+       guides(fill=guide_legend(title="Sample"), color = FALSE)+
+       theme_minimal()+
+       ggtitle(paste0("Predictions vs Output.\n Sample: ",t, "\n Model: rf"))+
+       geom_text(x = 5, y = 0.1, label= paste0("mae: ", MAE[[i]][[t]][["rf"]]), color = "black")+
+       geom_text(x = 5, y = 0.12, label= paste0("rmse: ", RMSE[[i]][[t]][["rf"]]), color = "black",  alpha = 1,
+            vjust = 1, 
+            size = 4)+
+       geom_text(x = 5, y = 0.14, label= paste0("r2: ", Rsquared[[i]][[t]][["rf"]]), color = "black", alpha = 1,
+            vjust = 1, 
+            size = 4)
+  ggsave(p_rf[[i]][[t]], filename = xf)
+  }
+  }else{
+  pred_real <- cbind("pred" = predictions[[i]][[t]][["rf"]], Y_test[[i]][[t]]) %>% 
+  gather(Value, Variable) %>% 
+  dplyr::mutate(n = n()) %>% 
+  dplyr::group_by(Variable, Value) %>%
+  dplyr::summarise(count = n(), pct = round(count/n,3))
+  pred_real$Variable <- plyr::revalue(pred_real$Variable , c(X1 = "Not Depressed",X2 ="Depressed"))
+
+   #Accuracy and Sensitivity
+
+    sensitivity[["mental_index"]][[t]][["rf"]] <-      confusionMatrix(predictions[["mental_index"]][[t]][["rf"]],Y_test[["mental_index"]][[t]]$output)$byClass["Sensitivity"]
+ 
+  ROC[["mental_index"]][[t]][["rf"]] <-      confusionMatrix(predictions[["mental_index"]][[t]][["rf"]],Y_test[["mental_index"]][[t]]$output)$overall["Accuracy"]
+  
+  specificity[["mental_index"]][[t]][["rf"]] <-    confusionMatrix(predictions[["mental_index"]][[t]][["rf"]],Y_test[["mental_index"]][[t]]$output)$byClass["Specificity"]
+  
+test_measure[["mental_index"]][[t]][["rf"]] <- cbind("ROC"= ROC[["mental_index"]][[t]][["rf"]],
+                      "Sens" = sensitivity[["mental_index"]][[t]][["rf"]],
+                      "Spec"= specificity[["mental_index"]][[t]][["rf"]]
+                     ) %>% 
+                as.data.frame() %>% 
+                mutate(model = "rf")
+  #plot of predictions: real vs predicted
+  p_rf[[i]][[t]] <-  ggplot(pred_real,                                     
+       aes(as.factor(Variable), y = pct, color= Value, fill = Value, label = scales::percent(pct)))+
+       geom_col(alpha = 0.5, position = "dodge")+
+       geom_text(position = position_dodge(width = .5),    # move to center of bars
+              vjust = -0.5,    # nudge above top of bar
+              size = 4) +
+        scale_y_continuous(labels = scales::percent)+
+        scale_x_discrete()+
+        xlab(paste0(i))+
+        guides(fill=guide_legend(title="Sample"), color = FALSE)+
+        theme_minimal()+
+        ggtitle(paste0("Predictions vs Output.\n Sample: ",t, "\n Model: rf","\n Target: ", i)) + 
+        geom_text(x = "Depressed", y = 0.30, label= paste0("Accuracy: ",    round(ROC[["mental_index"]][[t]][["rf"]],3)), color = "black", size = 4)+
+        geom_text(x = "Depressed", y = 0.28, label= paste0("Sensitivity: ",round( sensitivity[["mental_index"]][[t]][["rf"]],3)), color = "black", size = 4)
+  
+  ggsave(p_rf[[i]][[t]], filename = xf)
+  }
+ }
+}
+
+```
+
+# Training and test sample
+
+To build the models, we employ two types of samples, that differ essentially in their size. The first is the pooled sample of all 12 European countries, which counts for 49.852 observations. The second is the individual country sample, which counts on average 4100 observations. In both cases, we retrieve 70% of the overall observations as train samples and the remaining 30% as test samples.
+
+Thus, for models' tuning, we use the train samples combined with K-fold cross-validation, with k = 5. The cross-validation tuning procedure involves taking the available data in the training set and partitioning it into K groups. Then K − 1 of the groups is used to train a set of models that are then evaluated on the remaining group. This procedure is then repeated for all K possible choices for the held-out group, and the performance scores from the K runs are then averaged to get the validation error. The tuned parameters are those that correspond to the minimum validation error. 
+
+In the following plot, we report the distribution of the three targets in the train and test samples for the pooled sample and for a sub-sample of countries, i.e. Italy and Sweden. 
+
+The tree targets' distribution behave similarly in the train and test sample. The adjusted frailty has an approximately normal shape; the life satisfaction has a discrete distribution skewed on the right; the depression index is highly unbalanced, with most cases belonging to the "not depressed" class. The unbalanced distribution of the depression item may create classifcation issues. One way to solve these issues is to perform down-sampling in the trining step of classification models. Down-sampling consists in randomly subset all the classes in the training set so that their class frequencies match the least prevalent class. In our pooled sample,for example, we have that 80% of the training set samples are the first class and the remaining 20% are in the second class. Down-sampling would randomly sample the first class to be the same size as the second class (so that only 40% of the total training set is used to fit the model)
+
+# Evalutating model performance
+
+Once the models have been trained, the subsequent step is to evaluate their predictive performance out-of-sample. For this purpose we require a test sample, a set of observations that have been hold-out from the overall sample in the models' training stage. 
+
+Depending on whether we are in the regression or classification realms, we employ different metrics to assess predicting accuracy. In the regression framework, the coventional metrics are the Mean Squared Error (MSE), the Root Mean Squared Error (RMSE) and the correlation coefficients (R2). 
+
+The MSE and the RMSE measure the average distance of the prediction from the true value. The equation for the MSE is as follows, where $n$ indicates the number of predictions and $e_i$ indicates the error for prediction $i$, i.e. $y_i - \hat{y}_i$:$$ MSE = \frac{1}{n}\sum_{i=1}^n e_i^2$$; the RMSE is the square root of the above expression. 
+
+The mean squared error is differentiable and can be used easily as a loss function, however it presents some drawbacks. First, the value you get after calculating MSE is a squared unit of output. for example, the output variable is in meter(m) then after calculating MSE the output we get is in meter squared, for this reason it sometimes preferable to assess the RMSE. Second, if you have outliers in the dataset then it penalizes the outliers most and the calculated MSE is bigger. 
+
+The correlation coefficients (R2) is simply the correlation among predicted and true values. It measures the strength of the relationship between your model and the dependent variable. The R2 is calculated by the sum of squared of prediction error divided by the total sum of the square which replaces the calculated prediction with mean. The R2 value is between 0 to 1 and a bigger value indicates a better fit between prediction and actual value. The equation takes the following form.
+
+When dealing with classification models, the evaluation tool mostly used is the *confusion matrix*. 
+
+
+##Prediction results
+```{r}
+#Plotting the Validation and test error for all the models and train set
+
+df_val <- list()
+df_test <- list()
+test_df <- list()
+val_df <- list()
+
+for(i in target_name){
+for(t in c("pooled", countries)){
+  df_val[[i]][[t]] <- do.call(rbind.data.frame, validation[[i]][[t]]) %>% mutate(sample = t)
+  for(t in c("pooled", countries)){
+  val_df[[i]] <- do.call(rbind.data.frame, df_val[[i]])
+  val_df[[i]] <- val_df[[i]] %>%  mutate(model = factor(model, levels=c('lm',"ridge","lasso","elnet","tree", "rf"))) 
+  }
+ }
+}
+
+for(i in target_name){
+for(t in c("pooled", countries)){
+  df_test[[i]][[t]] <- do.call(rbind.data.frame, test_measure[[i]][[t]]) %>% mutate(sample = t)
+  for(t in c("pooled", countries)){
+  test_df[[i]] <- do.call(rbind.data.frame,  df_test[[i]])
+  test_df[[i]] <-  test_df[[i]] %>%  mutate(model = factor(model,   levels=c('lm',"ridge","lasso","elnet","tree","rf"))) 
+   }
+}
+}
+RMSE_plot <- list()
+for(i in c("frailty_index","lifesat","income")){
+RMSE_plot[[i]] <-   val_df[[i]] %>%
+        filter(RMSE < 10) %>% 
+				ggplot(. ,aes(y=RMSE,x=model, color = model)) +
+				geom_boxplot(position = position_dodge(1), outlier.shape = NA)+
+				geom_point(data=test_df[[i]] ,aes(y=RMSE,
+				                                  x= model, 
+				                                  fill = model,
+				                                  shape = model ,
+				                                  group = model),
+                alpha  =1, size=2)+
+				facet_wrap(~factor(sample, levels=c('pooled',countries)),scales = "free")+
+				xlab("") + 
+        theme_minimal()+
+	      theme(axis.title.x=element_blank(),
+                axis.text.x=element_blank(),
+                axis.ticks.x=element_blank()) + 	
+                ggtitle(paste0("RMSE: ",i))+				
+                guides(fill = guide_legend(override.aes = list(shape = NA)))
+}
+sensitivity_plot <- list()
+accuracy_plot <-list()
+for(i in c("mental_index")){
+  
+sensitivity_plot[[i]] <-   val_df[[i]] %>%
+				ggplot(. ,aes(y=Sens,x=model, color = model)) +
+				geom_boxplot(position = position_dodge(1), outlier.shape = NA)+
+				geom_point(data=test_df[[i]] ,aes(y=Sens,
+				                                  x= model, 
+				                                  fill = model,
+				                                  shape = model ,
+				                                  group = model),
+                alpha  =1, size=2)+
+				facet_wrap(~factor(sample, levels=c('pooled',countries)), scales = "free")+
+				xlab("") + 
+        theme_minimal()+
+	      theme(axis.title.x=element_blank(),
+                axis.text.x=element_blank(),
+                axis.ticks.x=element_blank()) + 	
+                ggtitle(paste0("Sensitivity: ",i))+				
+                guides(fill = guide_legend(override.aes = list(shape = NA)))
+accuracy_plot[[i]] <-   val_df[[i]] %>%
+				ggplot(. ,aes(y=ROC,x=model, color = model)) +
+				geom_boxplot(position = position_dodge(1), outlier.shape = NA)+
+				geom_point(data=test_df[[i]] ,aes(y=ROC,
+				                                  x= model, 
+				                                  fill = model,
+				                                  shape = model ,
+				                                  group = model),
+                alpha  =1, size=2)+
+				facet_wrap(~factor(sample, levels=c('pooled',countries)), scales = "free")+
+				xlab("") + 
+        theme_minimal()+
+	      theme(axis.title.x=element_blank(),
+                axis.text.x=element_blank(),
+                axis.ticks.x=element_blank()) + 	
+                ggtitle(paste0("Accuracy: ",i))+				
+                guides(fill = guide_legend(override.aes = list(shape = NA)))
+}
+```
+                                 
+```{r}
+##################################ALGORITHMIC_BIAS#######################
+##Analysis of errors
+predictions_p <- list()
+grapherr <- list()
+mean_err <- list()
+for(i in output_name){
+  for(t in "pooled")
+#Create the dummy for the countries in th pooled sample
+  x <- X_test[[i]][[t]] %>%
+  mutate(country_austria = ifelse(country_belgium == 0 &
+                                    country_czech_republic == 0 &
+                                    country_denmark == 0 &
+                                    country_france == 0 &
+                                    country_germany == 0 &
+                                    country_greece == 0 &
+                                    country_italy == 0 &
+                                    country_poland == 0 &
+                                    country_spain == 0 &
+                                    country_sweden == 0 &
+                                    country_switzerland == 0, 1,0)) %>% 
+  mutate_at(vars(country_belgium:country_switzerland,country_austria), ~ ifelse(. == 0, NA, .)) %>%
+  gather("country","present", c(country_belgium:country_switzerland,country_austria), na.rm = TRUE) %>% 
+  select(-present) %>% mutate(country = as.factor(country))
+  
+  predictions_p[[i]] <- predictions[[i]][[t]]
+  predictions_p[[i]][["country"]] <- x$country
+  predictions_p[[i]][["age"]] <- x$age
+  predictions_p[[i]][["gender"]] <- x$gender_male
+  predictions_p[[i]][["output"]] <- Y_test[[i]][["pooled"]]
+  predictions_p[[i]] <- as.data.frame(predictions_p[[i]])
+  if(i == "mental_index"){
+  predictions_p[[i]][["err_lasso"]] <-  as.numeric(predictions_p[[i]][["output"]] !=  predictions_p[[i]][["lasso"]])
+  predictions_p[[i]][["err_ridge"]] <-  as.numeric(predictions_p[[i]][["output"]] !=  predictions_p[[i]][["ridge"]])
+  predictions_p[[i]][["err_elnet"]] <- as.numeric(predictions_p[[i]][["output"]] != predictions_p[[i]][["elnet"]])
+  predictions_p[[i]][["err_tree"]] <-  as.numeric(predictions_p[[i]][["output"]] !=  predictions_p[[i]][["tree"]])
+  predictions_p[[i]][["err_lm"]] <-  as.numeric(predictions_p[[i]][["output"]] !=   predictions_p[[i]][["lm"]])
+  }else{
+  predictions_p[[i]][["err_lasso"]] <-  predictions_p[[i]][["output"]] - predictions_p[[i]][["lasso"]]
+  predictions_p[[i]][["err_ridge"]] <-  predictions_p[[i]][["output"]] - predictions_p[[i]][["ridge"]]
+  predictions_p[[i]][["err_elnet"]] <-  predictions_p[[i]][["output"]] - predictions_p[[i]][["elnet"]]
+  predictions_p[[i]][["err_tree"]] <-  predictions_p[[i]][["output"]] -  predictions_p[[i]][["tree"]]
+  predictions_p[[i]][["err_lm"]] <-  predictions_p[[i]][["output"]] -    predictions_p[[i]][["lm"]]
+  }
+  if(i == "mental_index"){
+  grapherr[[i]] <- predictions_p[[i]] %>% gather(key = err, value = Value,    starts_with("err")) %>% group_by(err) %>%  dplyr::mutate(n = n()) %>% group_by(Value,err) %>% dplyr::summarise(count = n(), perc = count/n) %>% 
+ggplot(.,aes(as.factor(Value), perc))+geom_col(position = "dodge")+ facet_wrap(vars(err))
+  }else{
+  mean_err[[i]] <- predictions_p[[i]] %>% gather(key = err, value = Value, starts_with("err")) %>% group_by(err) %>% dplyr::summarise(mean_err= mean(Value), sd_err = sd(Value))
+ grapherr[[i]] <- predictions_p[[i]] %>% gather(key = err, value = Value, starts_with("err")) %>% 
+ggplot(.,aes(Value))+geom_histogram(position = "dodge") +   facet_wrap(vars(err))+theme_tufte()
+  }
+  }
+```
+
+```{r}
+#Assessing error for each country, linear model vs random forest
+predictions_c <- list()
+grapherr_c <- list()
+mean_err_c <- list()
+for(i in target_name){
+  for(t in countries){
+#Create the dummy for the countries in th pooled sample
+  x <- X_test[[i]][[t]] 
+  
+ predictions_c[[i]][[t]][["lm"]] <- predictions[[i]][[t]]$lm
+ predictions_c[[i]][[t]][["rf"]] <- predictions[[i]][[t]]$rf
+ predictions_c[[i]][[t]][["age"]] <- x$age
+ predictions_c[[i]][[t]][["isced"]] <- x$isced_2low
+ predictions_c[[i]][[t]][["gender"]] <- x$gender_male
+ predictions_c[[i]][[t]][["output"]] <- Y_test[[i]][[t]]$output
+ predictions_c[[i]][[t]][["country"]] <- t
+ predictions_c[[i]][[t]] <- as.data.frame(predictions_c[[i]][[t]])
+  if(i == "mental_index"){
+ predictions_c[[i]][[t]][["err_lm"]] <-  as.numeric(predictions_c[[i]][[t]][["output"]] !=  predictions_c[[i]][[t]][["lm"]])
+ predictions_c[[i]][[t]][["err_rf"]] <-  as.numeric(predictions_c[[i]][[t]][["output"]] !=  predictions_c[[i]][[t]][["rf"]])
+  }else{
+ predictions_c[[i]][[t]][["err_lm"]] <- predictions_c[[i]][[t]][["output"]] -   predictions_c[[i]][[t]][["lm"]]
+ predictions_c[[i]][[t]][["err_rf"]] <- predictions_c[[i]][[t]][["output"]] - predictions_c[[i]][[t]][["rf"]]
+  }
+  if(i == "mental_index"){
+  grapherr_c[[i]][[t]] <- predictions_c[[i]][[t]] %>%
+    gather(key = err, value = Value, starts_with("err")) %>%
+    mutate(country = abbreviate(t),
+            gender = case_when(
+              grepl(0, gender)~ "Female",
+              TRUE ~ "Male"
+            )) %>% 
+    group_by(err) %>% 
+    dplyr::mutate(n = n()) %>% 
+    group_by(Value,err) %>%
+    dplyr::summarise(count = n(), perc = count/n) %>%
+    mutate(country = t) %>% 
+    ggplot(.,aes(x = as.factor(Value), perc,
+                 fill = err,
+                 color= err
+                 ))+
+                 geom_col(position = "dodge")
+    theme_minimal()
+  }else{
+    mean_err_c[[i]][[t]] <- predictions_c[[i]][[t]] %>%
+      gather(key = err, value = Value, starts_with("err")) %>%  
+      group_by(err) %>% 
+      dplyr::summarise(mean_err= mean(Value), sd_err = sd(Value)) %>%    mutate(country = t)
+ 
+  grapherr_c[[i]][[t]] <- predictions_c[[i]][[t]] %>% 
+     gather(key = err, value = Value, starts_with("err")) %>% 
+     mutate(country = abbreviate(t),
+            gender = case_when(
+              grepl(0, gender)~ "Female",
+              TRUE ~ "Male"
+            )) %>% 
+     ggplot(.,aes(y = Value, x = output, size = age, color = as.factor(gender)))+
+     geom_point(alpha = 0.5) +  facet_wrap(vars(err))+
+     geom_text(data = mean_err_c[[i]][[t]], aes(y = 1, x= -2, label =paste0("Mean_err: ",round( mean_err,2))),
+            color = "black",
+            alpha = 1,
+            vjust = 1, 
+            size = 4
+    )+
+     geom_text(data = mean_err_c[[i]][[t]], aes(y = 2, x= -2, label =paste0("Sd_err: ", round(sd_err,2))),
+            color = "black",
+            alpha = 1,
+            vjust = 1, 
+            size = 4
+    )+
+     theme_minimal()
+  }
+  }
+}
+
+predictions_df <- list()
+mean_err_c_df <- list()
+for(i in target_name){
+predictions_df[[i]] <- do.call(rbind.data.frame, predictions_c[[i]]) %>%
+    mutate(gender = case_when(
+              grepl(0, gender)~ "Female",
+              TRUE ~ "Male"
+            ),
+           isced = case_when(
+             grepl(0,isced)~ "Medium-High",
+             grepl(1,isced)~ "Low"
+           ))
+if(i %in% c( "lifesat","income","frailty_index"))
+ mean_err_c_df[[i]] <- do.call(rbind.data.frame, mean_err_c[[i]]) 
+}
+
+
+for(i in target_name[c(1,3,4)]){
+ xl <- sprintf("Figures/err_lm_%s.pdf",i)
+ xage <- sprintf("Figures/age_lm_%s.pdf",i)
+ xr <- sprintf("Figures/err_rf_%s.pdf",i)
+ xrage <-  sprintf("Figures/age_rf_%s.pdf",i)
+
+ #Linear Regression
+ #Random Forest
+  
+rf_err <- predictions_df[[i]] %>%
+  ggplot(., aes(err_rf))+  
+     geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity') +
+     geom_text(data = mean_err_c_df[[i]] %>% filter(err == "err_rf"), aes(y = 75, x= -1, label =paste0("Sd: ", round(sd_err,2))),
+            color = "black",
+            alpha = 1,
+            vjust = 1, 
+            size = 3
+    )+
+    geom_vline(data = mean_err_c_df[[i]] %>% filter(err == "err_rf",mean_err > 0), mapping = aes(xintercept = mean_err), colour = "red" , linetype = "longdash") +
+    geom_vline(data = mean_err_c_df[[i]] %>% filter(err == "err_rf",mean_err <= 0), mapping = aes(xintercept = mean_err), colour = "blue" , linetype = "longdash")+
+    facet_wrap(~ country,scale = "free")+
+    theme_minimal()+
+    ylab("")+
+  ggtitle(paste0("Histograms of errors random forest: ", i))
+
+ggsave(rf_err, file = xr) 
+
+if(i == "frailty_index"){
+isced_rf_err <- predictions_df[[i]] %>% 
+  ggplot(., aes(y = output, x = err_rf, color = gender, shape = isced))+
+    geom_point(alpha=0.6)+
+    scale_size_continuous(range = c(0.1,3))+
+    facet_wrap(~ country,scale = "free")+
+    theme_minimal()+
+    ylab("True Value")+
+    xlab("Error")+
+  ggtitle(paste0("Error-Education-Gender: ", i))
+ggsave(isced_rf_err, file = xrage) 
+
+}else{
+gender_rf_err <- predictions_df[[i]] %>% 
+  ggplot(., aes(y = output, x = err_rf, color = gender,shape = isced))+
+    geom_point(alpha=0.6)+
+    scale_size_continuous(range = c(0.1,3))+
+    facet_wrap(~ country,scale = "free")+
+    theme_minimal()+
+    ylab("True Value")+
+    xlab("Error")+
+  ggtitle(paste0("Error-Education-Gender: ", i))
+ggsave(gender_rf_err, file = xrage) 
+}
+}
+```
+
+
+country_belgium == 0 &In a binary classification problem, we first need to define arbitrarily the class categories as positive and negative. In our exercise, the positive class is $y=1$ (Depressed), indeed the predictive tools we want to build should helps detecting the more vulnerable class, in this case respondent's with a number of depression symptoms higher or equal to 4. Then:
+
+* P: number of positive classes in the sample;
+
+* N: number of negative classes in the sample;
+
+* PP : number of positive predicted values;
+
+* PN : number of negative predicted values;
+
+* TP: is the number of positive responses predicted correctly;
+
+* TN: is the number of negative responses predicted correctly;
+
+* FP: is the numebr of negative classes predicted as negative;
+
+* FN: is the number of positive classes predicted as positive;
+
+From these baseline statistics we retrieve other important metrics:
+
+* Accuracy: $\frac{\text{TP} + \text{TN}}{\text{TP} + \text{TN} + \text{FP}+ \text{FN}}$;
+ 
+* Specificity or true negative rate: $\frac{TN}{N}$;
+ 
+* Sensitivity or true positive rate: $\frac{TP}{P}$;
+ 
+* Positive predicted value or precision: $\frac{TP}{PP}$;
+ 
+* Negative predicted vaue: $\frac{TN}{PN}$;
+ 
+* Prevalence: $\frac{P}{P + N}$;
+ 
+* Detection Rate: $\frac{TP}{\text{TP} + \text{TN} + \text{FP}+ \text{FN}}$;
+ 
+* Detection Prevalence: $\frac{TP + FP}{\text{TP} + \text{TN} + \text{FP}+ \text{FN}}$;
+ 
+* Balanced Accuracy: $\frac{\text{specificity} + \text{sensitivity}}{2}$.
+
+In our application we will compare Sensitivity and Balanced Accuracy of the predicitve classificaion models.
+
+#Results 
+
+## Feature extraction
